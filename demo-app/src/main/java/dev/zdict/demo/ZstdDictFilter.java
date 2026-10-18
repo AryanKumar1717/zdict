@@ -114,15 +114,18 @@ public class ZstdDictFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Check X-Dict-Id header
-        String clientDictId = request.getHeader("X-Dict-Id");
-        if (clientDictId == null || !clientDictId.equals(dictId)) {
+        // Check path allowlist
+        if (!isAllowedPath(request.getRequestURI())) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        // Check path allowlist
-        if (!isAllowedPath(request.getRequestURI())) {
+        // Advertise dictionary id on allowed paths
+        response.setHeader("X-Dict-Id", dictId);
+
+        // Check X-Dict-Id header
+        String clientDictId = request.getHeader("X-Dict-Id");
+        if (clientDictId == null || !clientDictId.equals(dictId)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -200,11 +203,11 @@ public class ZstdDictFilter extends OncePerRequestFilter {
     }
 
     // Package-private accessors for tests and the dictionary endpoint
-    String getDictId() {
+    public String getDictId() {
         return dictId;
     }
 
-    byte[] getDictBytes() {
+    public byte[] getDictBytes() {
         return dictBytes;
     }
 
