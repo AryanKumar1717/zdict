@@ -72,9 +72,14 @@ public class ZstdDictFilter extends OncePerRequestFilter {
         }
         Path dictPath = Path.of(pathStr);
         if (!Files.isRegularFile(dictPath)) {
-            log.warn("Dictionary file not found: {}; zdict filter disabled", dictPath);
-            props.setEnabled(false);
-            return;
+            Path fallback = Path.of("demo-app", pathStr);
+            if (Files.isRegularFile(fallback)) {
+                dictPath = fallback;
+            } else {
+                log.warn("Dictionary file not found: {}; zdict filter disabled", dictPath);
+                props.setEnabled(false);
+                return;
+            }
         }
         try {
             dictBytes = Files.readAllBytes(dictPath);

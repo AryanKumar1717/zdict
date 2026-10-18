@@ -1,0 +1,11 @@
+server:
+  compression:
+    enabled: true
+    mime-types: application/json
+    min-response-size: 256
+
+zdict:
+  enabled: true
+  dictionary-path: dictionary/products.dict
+  paths:
+    - /api/products
