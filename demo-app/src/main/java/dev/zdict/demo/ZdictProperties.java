@@ -13,6 +13,8 @@ public class ZdictProperties {
     private boolean enabled = false;
     private String dictionaryPath = "";
     private List<String> paths = List.of();
+    private boolean allowAuthenticated = false;
+    private boolean skipReflectedInput = true;
 
     public boolean isEnabled() {
         return enabled;
@@ -36,5 +38,21 @@ public class ZdictProperties {
 
     public void setPaths(List<String> paths) {
         this.paths = paths;
+    }
+
+    public boolean isAllowAuthenticated() {
+        return allowAuthenticated;
+    }
+
+    public void setAllowAuthenticated(boolean allowAuthenticated) {
+        this.allowAuthenticated = allowAuthenticated;
+    }
+
+    public boolean isSkipReflectedInput() {
+        return skipReflectedInput;
+    }
+
+    public void setSkipReflectedInput(boolean skipReflectedInput) {
+        this.skipReflectedInput = skipReflectedInput;
     }
 }

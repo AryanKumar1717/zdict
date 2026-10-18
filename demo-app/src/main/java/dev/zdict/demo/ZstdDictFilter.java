@@ -10,33 +10,27 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.Map;
 
 /**
  * Servlet filter that compresses JSON responses using zstd with a shared dictionary.
  *
- * <p>Compression is applied only when ALL conditions are met:
- * <ul>
- *   <li>zdict.enabled = true</li>
- *   <li>HTTP method is GET</li>
- *   <li>Response status is 200</li>
- *   <li>Content-Type is application/json</li>
- *   <li>Request path starts with one of the configured allowlist prefixes</li>
- *   <li>Response body is between 200 bytes and 1 MB</li>
- *   <li>The request sends X-Dict-Id matching the server's current dictionary id</li>
- * </ul>
- *
- * <p>Fails open: any compression error logs a warning and sends the uncompressed body.
+ * <p>Includes a safety layer (auth/cookie skip, BREACH protection), circuit breaker,
+ * kill switch, and Micrometer metrics.
  */
 @Component
 @EnableConfigurationProperties(ZdictProperties.class)
@@ -49,13 +43,42 @@ public class ZstdDictFilter extends OncePerRequestFilter {
     private static final int MAX_SIZE = 1_000_000;
 
     private final ZdictProperties props;
+    private final ZdictCircuitBreaker circuitBreaker;
+    private final ZdictMetrics metrics;
+
+    private volatile boolean runtimeEnabled = true;
 
     private byte[] dictBytes;
     private String dictId;
     private ZstdDictCompress cdict;
 
     public ZstdDictFilter(ZdictProperties props) {
+        this(props, new ZdictCircuitBreaker(), null);
+    }
+
+    @Autowired
+    public ZstdDictFilter(ZdictProperties props,
+                          ZdictCircuitBreaker circuitBreaker,
+                          @Nullable ZdictMetrics metrics) {
         this.props = props;
+        this.circuitBreaker = circuitBreaker != null ? circuitBreaker : new ZdictCircuitBreaker();
+        this.metrics = metrics;
+    }
+
+    public boolean isEnabled() {
+        return props.isEnabled() && runtimeEnabled;
+    }
+
+    public void setEnabled(boolean enabled) {
+        this.runtimeEnabled = enabled;
+    }
+
+    public ZdictCircuitBreaker getCircuitBreaker() {
+        return circuitBreaker;
+    }
+
+    public ZdictMetrics getMetrics() {
+        return metrics;
     }
 
     @PostConstruct
@@ -103,29 +126,56 @@ public class ZstdDictFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        if (!props.isEnabled() || cdict == null) {
+        String uri = request.getRequestURI();
+
+        // Check path allowlist
+        if (!isAllowedPath(uri)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        // Check kill switch
+        if (!isEnabled() || cdict == null) {
+            recordSkipped("disabled");
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        // Check circuit breaker
+        if (circuitBreaker.isOpen()) {
+            recordSkipped("circuit_open");
             filterChain.doFilter(request, response);
             return;
         }
 
         // Only compress GET requests
         if (!"GET".equalsIgnoreCase(request.getMethod())) {
+            recordSkipped("unsupported_method");
             filterChain.doFilter(request, response);
             return;
         }
 
-        // Check path allowlist
-        if (!isAllowedPath(request.getRequestURI())) {
-            filterChain.doFilter(request, response);
-            return;
+        // Safety: skip if request has Authorization or Cookie header (unless allow-authenticated=true)
+        if (!props.isAllowAuthenticated()) {
+            if (request.getHeader("Authorization") != null || request.getHeader("Cookie") != null) {
+                recordSkipped("authenticated_request");
+                filterChain.doFilter(request, response);
+                return;
+            }
         }
 
         // Advertise dictionary id on allowed paths
         response.setHeader("X-Dict-Id", dictId);
 
-        // Check X-Dict-Id header
+        // Check X-Dict-Id header from client
         String clientDictId = request.getHeader("X-Dict-Id");
-        if (clientDictId == null || !clientDictId.equals(dictId)) {
+        if (clientDictId == null) {
+            recordSkipped("no_dict_id");
+            filterChain.doFilter(request, response);
+            return;
+        }
+        if (!clientDictId.equals(dictId)) {
+            recordSkipped("wrong_dict_id");
             filterChain.doFilter(request, response);
             return;
         }
@@ -137,13 +187,33 @@ public class ZstdDictFilter extends OncePerRequestFilter {
         try {
             // Check status
             if (wrappedResponse.getStatus() != 200) {
+                recordSkipped("status_not_200");
                 wrappedResponse.copyBodyToResponse();
                 return;
+            }
+
+            // Safety: response has Set-Cookie or Cache-Control: private/no-store
+            if (!props.isAllowAuthenticated()) {
+                if (wrappedResponse.getHeader("Set-Cookie") != null) {
+                    recordSkipped("set_cookie_response");
+                    wrappedResponse.copyBodyToResponse();
+                    return;
+                }
+                String cacheControl = wrappedResponse.getHeader("Cache-Control");
+                if (cacheControl != null) {
+                    String ccLower = cacheControl.toLowerCase();
+                    if (ccLower.contains("private") || ccLower.contains("no-store")) {
+                        recordSkipped("private_cache_response");
+                        wrappedResponse.copyBodyToResponse();
+                        return;
+                    }
+                }
             }
 
             // Check content type
             String contentType = wrappedResponse.getContentType();
             if (contentType == null || !contentType.toLowerCase().startsWith("application/json")) {
+                recordSkipped("non_json");
                 wrappedResponse.copyBodyToResponse();
                 return;
             }
@@ -152,12 +222,41 @@ public class ZstdDictFilter extends OncePerRequestFilter {
 
             // Check size bounds
             if (body.length < MIN_SIZE || body.length > MAX_SIZE) {
+                recordSkipped("size_out_of_bounds");
+                wrappedResponse.copyBodyToResponse();
+                return;
+            }
+
+            // BREACH guard: skip compression if query param value (length >= 4) appears verbatim in body
+            if (props.isSkipReflectedInput() && isReflectedInput(request, body)) {
+                recordSkipped("reflected_input");
                 wrappedResponse.copyBodyToResponse();
                 return;
             }
 
             // Compress
-            byte[] compressed = Zstd.compress(body, cdict);
+            long start = System.nanoTime();
+            byte[] compressed;
+            try {
+                compressed = Zstd.compress(body, cdict);
+            } catch (Exception e) {
+                long elapsed = System.nanoTime() - start;
+                circuitBreaker.recordFailure(elapsed);
+                if (metrics != null) {
+                    metrics.recordResponse("failed", "compression_error");
+                }
+                throw e;
+            }
+
+            long elapsed = System.nanoTime() - start;
+            circuitBreaker.recordSuccess(elapsed);
+
+            if (metrics != null) {
+                metrics.recordCompressTime(elapsed);
+                metrics.recordBytesOriginal(uri, body.length);
+                metrics.recordBytesCompressed(uri, compressed.length);
+                metrics.recordResponse("compressed", "none");
+            }
 
             response.setContentLength(compressed.length);
             response.setHeader("Content-Encoding", "zstd-dict");
@@ -177,6 +276,29 @@ public class ZstdDictFilter extends OncePerRequestFilter {
         }
     }
 
+    private void recordSkipped(String reason) {
+        if (metrics != null) {
+            metrics.recordResponse("skipped", reason);
+        }
+    }
+
+    private boolean isReflectedInput(HttpServletRequest request, byte[] body) {
+        Map<String, String[]> params = request.getParameterMap();
+        if (params == null || params.isEmpty()) {
+            return false;
+        }
+        String bodyString = new String(body, StandardCharsets.UTF_8);
+        for (String[] values : params.values()) {
+            if (values == null) continue;
+            for (String val : values) {
+                if (val != null && val.length() >= 4 && bodyString.contains(val)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private boolean isAllowedPath(String uri) {
         if (props.getPaths() == null) {
             return false;
@@ -192,7 +314,7 @@ public class ZstdDictFilter extends OncePerRequestFilter {
     /**
      * Dictionary id = first 8 hex chars of the SHA-256 of the dictionary bytes.
      */
-    static String computeDictId(byte[] dict) {
+    public static String computeDictId(byte[] dict) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] hash = md.digest(dict);
@@ -202,7 +324,6 @@ public class ZstdDictFilter extends OncePerRequestFilter {
         }
     }
 
-    // Package-private accessors for tests and the dictionary endpoint
     public String getDictId() {
         return dictId;
     }

@@ -5,6 +5,7 @@ import com.github.luben.zstd.ZstdDictCompress;
 import com.github.luben.zstd.ZstdDictDecompress;
 import com.github.luben.zstd.ZstdDictTrainer;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,8 +20,17 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.http.MediaType;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.util.concurrent.atomic.AtomicLong;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /**
@@ -41,6 +51,12 @@ class ZstdDictFilterTest {
 
     @Autowired
     ZstdDictFilter filter;
+
+    @BeforeEach
+    void resetState() {
+        filter.setEnabled(true);
+        filter.getCircuitBreaker().reset();
+    }
 
     /**
      * Train a small dictionary from synthetic product JSON, write it to a temp file.
@@ -78,6 +94,7 @@ class ZstdDictFilterTest {
         registry.add("zdict.enabled", () -> "true");
         registry.add("zdict.dictionary-path", () -> tempDir.resolve("test.dict").toString());
         registry.add("zdict.paths", () -> "/api/products");
+        registry.add("management.endpoints.web.exposure.include", () -> "*");
     }
 
     // ---- Round-trip test ----
@@ -204,5 +221,189 @@ class ZstdDictFilterTest {
     void dictionaryEndpointReturns404ForWrongId() throws Exception {
         mockMvc.perform(get("/zdict/dictionary/deadbeef"))
                 .andExpect(status().isNotFound());
+    }
+
+    // ---- Safety Layer Tests ----
+
+    @Test
+    void passThroughWhenAuthorizationHeaderPresent() throws Exception {
+        mockMvc.perform(get("/api/products?page=1")
+                        .header("X-Dict-Id", dictId)
+                        .header("Authorization", "Bearer test-token-12345"))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Content-Encoding"))
+                .andExpect(jsonPath("$.status").value("ok"));
+    }
+
+    @Test
+    void passThroughWhenCookieHeaderPresent() throws Exception {
+        mockMvc.perform(get("/api/products?page=1")
+                        .header("X-Dict-Id", dictId)
+                        .header("Cookie", "sessionId=test-cookie-val"))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Content-Encoding"))
+                .andExpect(jsonPath("$.status").value("ok"));
+    }
+
+    @Test
+    void passThroughWhenResponseHasSetCookie() throws Exception {
+        mockMvc.perform(get("/api/products/set-cookie")
+                        .header("X-Dict-Id", dictId))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Content-Encoding"))
+                .andExpect(header().exists("Set-Cookie"));
+    }
+
+    @Test
+    void passThroughWhenResponseHasPrivateCacheControl() throws Exception {
+        mockMvc.perform(get("/api/products/private-cache")
+                        .header("X-Dict-Id", dictId))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Content-Encoding"));
+    }
+
+    @Test
+    void passThroughWhenQueryParamReflectedInBody() throws Exception {
+        mockMvc.perform(get("/api/products/reflect?search=reflectMe123")
+                        .header("X-Dict-Id", dictId))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Content-Encoding"))
+                .andExpect(jsonPath("$.search").value("reflectMe123"));
+    }
+
+    // ---- Kill Switch & Actuator Endpoint Tests ----
+
+    @Test
+    void passThroughWhenKillSwitchOff() throws Exception {
+        filter.setEnabled(false);
+        try {
+            mockMvc.perform(get("/api/products?page=1")
+                            .header("X-Dict-Id", dictId))
+                    .andExpect(status().isOk())
+                    .andExpect(header().doesNotExist("Content-Encoding"));
+        } finally {
+            filter.setEnabled(true);
+        }
+    }
+
+    @Test
+    void actuatorEndpointReadsAndTogglesKillSwitch() throws Exception {
+        // Read state
+        mockMvc.perform(get("/actuator/zdict"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(true));
+
+        // Disable via POST
+        mockMvc.perform(post("/actuator/zdict")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(false));
+
+        assertThat(filter.isEnabled()).isFalse();
+
+        // Re-enable
+        mockMvc.perform(post("/actuator/zdict")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(true));
+
+        assertThat(filter.isEnabled()).isTrue();
+    }
+
+    // ---- Circuit Breaker Tests ----
+
+    @Test
+    void circuitBreakerOpensOnFailuresAndLaterRecovers() throws Exception {
+        ZdictCircuitBreaker cb = filter.getCircuitBreaker();
+        cb.reset();
+
+        AtomicLong currentTimeMs = new AtomicLong(100_000);
+        Clock testClock = new Clock() {
+            @Override
+            public ZoneId getZone() {
+                return ZoneId.of("UTC");
+            }
+            @Override
+            public Clock withZone(ZoneId zone) {
+                return this;
+            }
+            @Override
+            public Instant instant() {
+                return Instant.ofEpochMilli(currentTimeMs.get());
+            }
+        };
+        cb.setClock(testClock);
+        cb.setOpenDurationMs(5_000);
+
+        // Record 12 failures (6% failure rate of 200)
+        for (int i = 0; i < 188; i++) {
+            cb.recordSuccess(100_000);
+        }
+        for (int i = 0; i < 12; i++) {
+            cb.recordFailure(100_000);
+        }
+
+        // Circuit breaker should now be OPEN
+        assertThat(cb.isOpen()).isTrue();
+
+        // Requests should pass through uncompressed while circuit breaker is OPEN
+        mockMvc.perform(get("/api/products?page=1")
+                        .header("X-Dict-Id", dictId))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Content-Encoding"));
+
+        // Advance time past the 5 second open window
+        currentTimeMs.addAndGet(6_000);
+
+        // Circuit breaker should recover (CLOSED)
+        assertThat(cb.isOpen()).isFalse();
+
+        // Compression should work again
+        mockMvc.perform(get("/api/products?page=1")
+                        .header("X-Dict-Id", dictId))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Encoding", "zstd-dict"));
+
+        // Reset to system clock
+        cb.setClock(Clock.systemUTC());
+        cb.setOpenDurationMs(60_000);
+        cb.reset();
+    }
+
+    // ---- Metrics Tests ----
+
+    @Test
+    void metricsCountersIncreaseAfterCompressedResponse() throws Exception {
+        MeterRegistry registry = filter.getMetrics().getRegistry();
+
+        double originalBytesBefore = registry.find("zdict.bytes.original").counter() != null
+                ? registry.find("zdict.bytes.original").counter().count() : 0.0;
+        double compressedBytesBefore = registry.find("zdict.bytes.compressed").counter() != null
+                ? registry.find("zdict.bytes.compressed").counter().count() : 0.0;
+        double responsesCompressedBefore = registry.find("zdict.responses")
+                .tag("result", "compressed").counter() != null
+                ? registry.find("zdict.responses").tag("result", "compressed").counter().count() : 0.0;
+
+        MvcResult result = mockMvc.perform(get("/api/products?page=1")
+                        .header("X-Dict-Id", dictId))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Encoding", "zstd-dict"))
+                .andReturn();
+
+        byte[] compressedBody = result.getResponse().getContentAsByteArray();
+
+        double originalBytesAfter = registry.find("zdict.bytes.original").counter().count();
+        double compressedBytesAfter = registry.find("zdict.bytes.compressed").counter().count();
+        double responsesCompressedAfter = registry.find("zdict.responses")
+                .tag("result", "compressed").counter().count();
+
+        assertThat(originalBytesAfter).isGreaterThan(originalBytesBefore);
+        assertThat(compressedBytesAfter).isEqualTo(compressedBytesBefore + compressedBody.length);
+        assertThat(responsesCompressedAfter).isEqualTo(responsesCompressedBefore + 1.0);
+
+        // Circuit open gauge should be 0.0
+        assertThat(registry.find("zdict.circuit.open").gauge().value()).isEqualTo(0.0);
     }
 }

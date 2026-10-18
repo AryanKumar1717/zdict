@@ -9,3 +9,11 @@ zdict:
   dictionary-path: dictionary/products.dict
   paths:
     - /api/products
+  allow-authenticated: false
+  skip-reflected-input: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
