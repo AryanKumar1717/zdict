@@ -1,6 +1,7 @@
 package dev.zdict.demo;
 
 import com.github.luben.zstd.Zstd;
+import com.github.luben.zstd.ZstdDictCompress;
 import com.github.luben.zstd.ZstdDictDecompress;
 import com.github.luben.zstd.ZstdDictTrainer;
 import org.junit.jupiter.api.BeforeAll;
@@ -37,6 +38,9 @@ class ZstdDictFilterTest {
 
     @Autowired
     MockMvc mockMvc;
+
+    @Autowired
+    ZstdDictFilter filter;
 
     /**
      * Train a small dictionary from synthetic product JSON, write it to a temp file.
@@ -80,7 +84,13 @@ class ZstdDictFilterTest {
 
     @Test
     void compressedResponseDecompressesToOriginalJson() throws Exception {
-        // Request with the dict id header - should compress
+        // First, get the uncompressed baseline response (no X-Dict-Id header)
+        MvcResult uncompressed = mockMvc.perform(get("/api/products?page=3"))
+                .andExpect(status().isOk())
+                .andReturn();
+        String originalJson = uncompressed.getResponse().getContentAsString();
+
+        // Now request with the dict id header - should compress
         MvcResult compressed = mockMvc.perform(get("/api/products?page=3")
                         .header("X-Dict-Id", dictId))
                 .andExpect(status().isOk())
@@ -92,25 +102,14 @@ class ZstdDictFilterTest {
         byte[] compressedBody = compressed.getResponse().getContentAsByteArray();
         assertThat(compressedBody.length).isGreaterThan(0);
 
-        // The filter also cached the original body in ContentCachingResponseWrapper.
-        // We know what the original JSON should look like, so decompress and verify
-        // it has a valid JSON structure with expected fields.
+        // Decompress and verify it matches the original JSON byte-for-byte
         try (ZstdDictDecompress ddict = new ZstdDictDecompress(dictBytes)) {
             long decompressedSize = Zstd.decompressedSize(compressedBody);
             assertThat(decompressedSize).isGreaterThan(0);
             byte[] decompressed = Zstd.decompress(compressedBody, ddict, (int) decompressedSize);
             String json = new String(decompressed, StandardCharsets.UTF_8);
 
-            // Verify it's valid JSON with the expected envelope
-            assertThat(json).startsWith("{\"status\":\"ok\"");
-            assertThat(json).contains("\"requestId\":");
-            assertThat(json).contains("\"data\":");
-            assertThat(json).contains("\"items\":[");
-            assertThat(json).contains("\"category\":");
-            assertThat(json).contains("\"price\":");
-            assertThat(json).contains("\"inStock\":");
-
-            // Verify compressed is actually smaller than decompressed
+            assertThat(json).isEqualTo(originalJson);
             assertThat(compressedBody.length).isLessThan(decompressed.length);
         }
     }
@@ -144,13 +143,51 @@ class ZstdDictFilterTest {
 
     @Test
     void passThroughWhenBodyTooSmall() throws Exception {
-        // Single product is typically < 200 bytes
-        mockMvc.perform(get("/api/products/1")
+        // Body is valid JSON but under 200 bytes
+        MvcResult result = mockMvc.perform(get("/api/products/tiny")
                         .header("X-Dict-Id", dictId))
                 .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Content-Encoding"))
                 .andReturn();
-        // We just verify it doesn't crash; the body may or may not be compressed
-        // depending on size. The key thing is no error.
+
+        assertThat(result.getResponse().getContentAsString()).isEqualTo("{\"status\":\"ok\"}");
+    }
+
+    @Test
+    void passThroughWhenNonJson() throws Exception {
+        // Non-JSON content type (text/plain) should not be compressed
+        MvcResult result = mockMvc.perform(get("/api/products/text")
+                        .header("X-Dict-Id", dictId))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Content-Encoding"))
+                .andReturn();
+
+        assertThat(result.getResponse().getContentType()).contains("text/plain");
+    }
+
+    // ---- Fail-open compression error test ----
+
+    @Test
+    void compressionFailureFailsOpenToOriginalBody() throws Exception {
+        // Temporarily set a closed compressor to force an exception in Zstd.compress
+        ZstdDictCompress badCdict = new ZstdDictCompress(new byte[]{0}, 3);
+        badCdict.close();
+        filter.setCdictForTesting(badCdict);
+
+        try {
+            MvcResult result = mockMvc.perform(get("/api/products?page=3")
+                            .header("X-Dict-Id", dictId))
+                    .andExpect(status().isOk())
+                    .andExpect(header().doesNotExist("Content-Encoding"))
+                    .andReturn();
+
+            String body = result.getResponse().getContentAsString();
+            assertThat(body).contains("\"status\":\"ok\"");
+            assertThat(body).contains("\"items\":[");
+        } finally {
+            // Restore a valid compressor
+            filter.setCdictForTesting(new ZstdDictCompress(dictBytes, 3));
+        }
     }
 
     // ---- Dictionary endpoint tests ----

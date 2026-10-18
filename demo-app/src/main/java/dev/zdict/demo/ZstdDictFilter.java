@@ -135,7 +135,7 @@ public class ZstdDictFilter extends OncePerRequestFilter {
 
             // Check content type
             String contentType = wrappedResponse.getContentType();
-            if (contentType == null || !contentType.startsWith("application/json")) {
+            if (contentType == null || !contentType.toLowerCase().startsWith("application/json")) {
                 wrappedResponse.copyBodyToResponse();
                 return;
             }
@@ -156,6 +156,7 @@ public class ZstdDictFilter extends OncePerRequestFilter {
             response.setHeader("X-Dict-Id", dictId);
             response.setHeader("Vary", "X-Dict-Id, Accept-Encoding");
             response.getOutputStream().write(compressed);
+            response.getOutputStream().flush();
 
         } catch (Exception e) {
             // Fail open: log and send original body
@@ -169,6 +170,9 @@ public class ZstdDictFilter extends OncePerRequestFilter {
     }
 
     private boolean isAllowedPath(String uri) {
+        if (props.getPaths() == null) {
+            return false;
+        }
         for (String prefix : props.getPaths()) {
             if (uri.startsWith(prefix)) {
                 return true;
@@ -197,5 +201,9 @@ public class ZstdDictFilter extends OncePerRequestFilter {
 
     byte[] getDictBytes() {
         return dictBytes;
+    }
+
+    void setCdictForTesting(ZstdDictCompress cdict) {
+        this.cdict = cdict;
     }
 }

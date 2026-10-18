@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,22 +25,19 @@ public class ProductController {
         data.put("items", items);
         data.put("page", page);
         data.put("total", items.size() * 10);
-        return wrap(data);
+        return wrap(data, "page=" + page);
     }
 
     @GetMapping("/{id}")
     public Map<String, Object> single(@PathVariable int id) {
         Product product = generator.generate(id);
-        return wrap(product);
+        return wrap(product, "product=" + id);
     }
 
-    private Map<String, Object> wrap(Object data) {
-        // Use a deterministic requestId seeded from the current thread to keep
-        // the response shape consistent. In a real app this would be random.
+    private Map<String, Object> wrap(Object data, String key) {
         Map<String, Object> envelope = new LinkedHashMap<>();
         envelope.put("status", "ok");
-        envelope.put("requestId", UUID.nameUUIDFromBytes(
-                Long.toString(Thread.currentThread().getId()).getBytes()).toString());
+        envelope.put("requestId", UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString());
         envelope.put("data", data);
         return envelope;
     }
