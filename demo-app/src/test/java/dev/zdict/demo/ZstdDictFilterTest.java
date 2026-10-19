@@ -423,4 +423,38 @@ class ZstdDictFilterTest {
         assertThat(counter).isNotNull();
         assertThat(counter.count()).isGreaterThan(0.0);
     }
+
+    @Test
+    void samplingFailureDoesNotAffectResponse() throws Exception {
+        SampleStore failingStore = new SampleStore(tempDir, 10, 1.0, new PayloadScrubber(), new java.util.Random()) {
+            @Override
+            public void offer(String groupKey, byte[] body) {
+                throw new RuntimeException("Simulated sampler storage failure");
+            }
+        };
+
+        ZdictProperties testProps = new ZdictProperties();
+        testProps.setEnabled(true);
+        testProps.setPaths(java.util.List.of("/api/"));
+        testProps.setDictionaryPath(tempDir.resolve("test.dict").toString());
+
+        ZstdDictFilter testFilter = new ZstdDictFilter(testProps, new ZdictCircuitBreaker(), null, failingStore);
+        org.springframework.mock.web.MockHttpServletRequest request = new org.springframework.mock.web.MockHttpServletRequest("GET", "/api/products");
+        request.setAttribute(org.springframework.web.servlet.HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/products");
+        org.springframework.mock.web.MockHttpServletResponse response = new org.springframework.mock.web.MockHttpServletResponse();
+
+        jakarta.servlet.Servlet servlet = new jakarta.servlet.http.HttpServlet() {
+            @Override
+            protected void doGet(jakarta.servlet.http.HttpServletRequest req, jakarta.servlet.http.HttpServletResponse resp) throws java.io.IOException {
+                resp.setStatus(200);
+                resp.setContentType("application/json");
+                resp.getOutputStream().write("{\"status\":\"ok\"}".getBytes(StandardCharsets.UTF_8));
+            }
+        };
+        org.springframework.mock.web.MockFilterChain chain = new org.springframework.mock.web.MockFilterChain(servlet);
+
+        testFilter.doFilter(request, response, chain);
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(response.getContentAsString()).isEqualTo("{\"status\":\"ok\"}");
+    }
 }

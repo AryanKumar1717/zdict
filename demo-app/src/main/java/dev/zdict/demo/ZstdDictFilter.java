@@ -46,6 +46,7 @@ public class ZstdDictFilter extends OncePerRequestFilter {
     private final ZdictProperties props;
     private final ZdictCircuitBreaker circuitBreaker;
     private final ZdictMetrics metrics;
+    private final SampleStore sampleStore;
 
     private volatile boolean runtimeEnabled = true;
 
@@ -54,16 +55,24 @@ public class ZstdDictFilter extends OncePerRequestFilter {
     private ZstdDictCompress cdict;
 
     public ZstdDictFilter(ZdictProperties props) {
-        this(props, new ZdictCircuitBreaker(), null);
+        this(props, new ZdictCircuitBreaker(), null, null);
+    }
+
+    public ZstdDictFilter(ZdictProperties props,
+                          ZdictCircuitBreaker circuitBreaker,
+                          @Nullable ZdictMetrics metrics) {
+        this(props, circuitBreaker, metrics, null);
     }
 
     @Autowired
     public ZstdDictFilter(ZdictProperties props,
                           ZdictCircuitBreaker circuitBreaker,
-                          @Nullable ZdictMetrics metrics) {
+                          @Nullable ZdictMetrics metrics,
+                          @Nullable SampleStore sampleStore) {
         this.props = props;
         this.circuitBreaker = circuitBreaker != null ? circuitBreaker : new ZdictCircuitBreaker();
         this.metrics = metrics;
+        this.sampleStore = sampleStore;
     }
 
     public boolean isEnabled() {
@@ -135,20 +144,6 @@ public class ZstdDictFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Check kill switch
-        if (!isEnabled() || cdict == null) {
-            recordSkipped("disabled");
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        // Check circuit breaker
-        if (circuitBreaker.isOpen()) {
-            recordSkipped("circuit_open");
-            filterChain.doFilter(request, response);
-            return;
-        }
-
         // Only compress GET requests
         if (!"GET".equalsIgnoreCase(request.getMethod())) {
             recordSkipped("unsupported_method");
@@ -165,23 +160,7 @@ public class ZstdDictFilter extends OncePerRequestFilter {
             }
         }
 
-        // Advertise dictionary id on allowed paths
-        response.setHeader("X-Dict-Id", dictId);
-
-        // Check X-Dict-Id header from client
-        String clientDictId = request.getHeader("X-Dict-Id");
-        if (clientDictId == null) {
-            recordSkipped("no_dict_id");
-            filterChain.doFilter(request, response);
-            return;
-        }
-        if (!clientDictId.equals(dictId)) {
-            recordSkipped("wrong_dict_id");
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        // Wrap response to capture output
+        // Wrap response to capture output for compression and sampling
         ContentCachingResponseWrapper wrappedResponse = new ContentCachingResponseWrapper(response);
         filterChain.doFilter(request, wrappedResponse);
 
@@ -237,44 +216,72 @@ public class ZstdDictFilter extends OncePerRequestFilter {
                 return;
             }
 
-            // Compress
-            long start = System.nanoTime();
-            byte[] compressed;
-            try {
-                compressed = Zstd.compress(body, cdict);
-            } catch (Exception e) {
-                long elapsed = System.nanoTime() - start;
-                circuitBreaker.recordFailure(elapsed);
-                if (metrics != null) {
-                    metrics.recordResponse("failed", "compression_error");
+            // Response is eligible for compression and sampling!
+            if (dictId != null) {
+                response.setHeader("X-Dict-Id", dictId);
+            }
+
+            boolean canCompress = isEnabled() && cdict != null && !circuitBreaker.isOpen();
+            String clientDictId = request.getHeader("X-Dict-Id");
+            boolean clientMatches = clientDictId != null && clientDictId.equals(dictId);
+
+            if (canCompress && clientMatches) {
+                long start = System.nanoTime();
+                try {
+                    byte[] compressed = Zstd.compress(body, cdict);
+                    long elapsed = System.nanoTime() - start;
+                    circuitBreaker.recordSuccess(elapsed);
+
+                    if (metrics != null) {
+                        metrics.recordCompressTime(elapsed);
+                        metrics.recordBytesOriginal(groupKey, body.length);
+                        metrics.recordBytesCompressed(groupKey, compressed.length);
+                        metrics.recordResponse("compressed", "none");
+                    }
+
+                    response.setContentLength(compressed.length);
+                    response.setHeader("Content-Encoding", "zstd-dict");
+                    response.setHeader("X-Dict-Id", dictId);
+                    response.setHeader("Vary", "X-Dict-Id, Accept-Encoding");
+                    response.getOutputStream().write(compressed);
+                    response.getOutputStream().flush();
+                } catch (Exception e) {
+                    long elapsed = System.nanoTime() - start;
+                    circuitBreaker.recordFailure(elapsed);
+                    if (metrics != null) {
+                        metrics.recordResponse("failed", "compression_error");
+                    }
+                    log.warn("zstd compression failed, sending uncompressed: {}", e.getMessage());
+                    wrappedResponse.copyBodyToResponse();
                 }
-                throw e;
+            } else {
+                if (!isEnabled() || cdict == null) {
+                    recordSkipped("disabled");
+                } else if (circuitBreaker.isOpen()) {
+                    recordSkipped("circuit_open");
+                } else if (clientDictId == null) {
+                    recordSkipped("no_dict_id");
+                } else {
+                    recordSkipped("wrong_dict_id");
+                }
+                wrappedResponse.copyBodyToResponse();
             }
 
-            long elapsed = System.nanoTime() - start;
-            circuitBreaker.recordSuccess(elapsed);
-
-            if (metrics != null) {
-                metrics.recordCompressTime(elapsed);
-                metrics.recordBytesOriginal(groupKey, body.length);
-                metrics.recordBytesCompressed(groupKey, compressed.length);
-                metrics.recordResponse("compressed", "none");
+            // Sampling: only sample responses eligible for compression
+            if (sampleStore != null) {
+                try {
+                    sampleStore.offer(groupKey, body);
+                } catch (Exception e) {
+                    log.warn("Sampling error for group {}: {}", groupKey, e.getMessage());
+                }
             }
-
-            response.setContentLength(compressed.length);
-            response.setHeader("Content-Encoding", "zstd-dict");
-            response.setHeader("X-Dict-Id", dictId);
-            response.setHeader("Vary", "X-Dict-Id, Accept-Encoding");
-            response.getOutputStream().write(compressed);
-            response.getOutputStream().flush();
 
         } catch (Exception e) {
-            // Fail open: log and send original body
-            log.warn("zstd compression failed, sending uncompressed: {}", e.getMessage());
+            log.warn("Error processing response: {}", e.getMessage());
             try {
                 wrappedResponse.copyBodyToResponse();
             } catch (Exception inner) {
-                log.error("Failed to send fallback uncompressed body", inner);
+                log.error("Failed to copy body to response", inner);
             }
         }
     }
