@@ -291,7 +291,13 @@ public class DictionaryRegistry implements Closeable {
     }
 
     public Set<String> getGroups() {
-        return Collections.unmodifiableSet(groupVersions.keySet());
+        Set<String> groups = new HashSet<>();
+        for (List<DictionaryVersion> list : groupVersions.values()) {
+            if (!list.isEmpty()) {
+                groups.add(list.get(0).getGroup());
+            }
+        }
+        return groups;
     }
 
     @Override

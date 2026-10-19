@@ -11,6 +11,8 @@ zdict:
     - /api/products
   allow-authenticated: false
   skip-reflected-input: true
+  auto-learning:
+    enabled: true
 
 management:
   endpoints:

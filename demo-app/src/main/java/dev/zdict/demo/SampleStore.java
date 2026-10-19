@@ -27,6 +27,7 @@ public class SampleStore {
     private final Random random;
 
     private final ConcurrentHashMap<String, GroupReservoir> reservoirs = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> slugToGroup = new ConcurrentHashMap<>();
 
     @Autowired
     public SampleStore(ZdictProperties props, PayloadScrubber scrubber) {
@@ -67,9 +68,10 @@ public class SampleStore {
 
             byte[] safePayload = scrubbed.get();
             String slug = ZstdDictFilter.toGroupSlug(groupKey);
+            slugToGroup.putIfAbsent(slug, groupKey);
             Path groupDir = dataDir.resolve("samples").resolve(slug);
 
-            GroupReservoir res = reservoirs.computeIfAbsent(groupKey, k -> {
+            GroupReservoir res = reservoirs.computeIfAbsent(slug, k -> {
                 GroupReservoir r = new GroupReservoir(perGroupMax, random);
                 r.loadFromDisk(groupDir);
                 return r;
@@ -82,13 +84,13 @@ public class SampleStore {
     }
 
     public List<byte[]> getSamples(String groupKey) {
-        GroupReservoir res = reservoirs.get(groupKey);
+        String slug = ZstdDictFilter.toGroupSlug(groupKey);
+        GroupReservoir res = reservoirs.get(slug);
         if (res == null) {
             // Check if exists on disk
-            String slug = ZstdDictFilter.toGroupSlug(groupKey);
             Path groupDir = dataDir.resolve("samples").resolve(slug);
             if (Files.isDirectory(groupDir)) {
-                res = reservoirs.computeIfAbsent(groupKey, k -> {
+                res = reservoirs.computeIfAbsent(slug, k -> {
                     GroupReservoir r = new GroupReservoir(perGroupMax, random);
                     r.loadFromDisk(groupDir);
                     return r;
@@ -99,14 +101,47 @@ public class SampleStore {
     }
 
     public int getSampleCount(String groupKey) {
-        GroupReservoir res = reservoirs.get(groupKey);
+        String slug = ZstdDictFilter.toGroupSlug(groupKey);
+        GroupReservoir res = reservoirs.get(slug);
         return res != null ? res.size() : 0;
     }
 
+    public Set<String> getGroups() {
+        Set<String> groups = new HashSet<>();
+        for (String slug : reservoirs.keySet()) {
+            groups.add(slugToGroup.getOrDefault(slug, "/" + slug.replace('_', '/')));
+        }
+        Path samplesBase = dataDir.resolve("samples");
+        if (Files.isDirectory(samplesBase)) {
+            try (Stream<Path> dirs = Files.list(samplesBase)) {
+                dirs.filter(Files::isDirectory)
+                        .forEach(d -> {
+                            String s = d.getFileName().toString();
+                            groups.add(slugToGroup.getOrDefault(s, "/" + s.replace('_', '/')));
+                        });
+            } catch (IOException ignored) {
+            }
+        }
+        return groups;
+    }
+
     public void clear(String groupKey) {
-        GroupReservoir res = reservoirs.remove(groupKey);
+        String slug = ZstdDictFilter.toGroupSlug(groupKey);
+        GroupReservoir res = reservoirs.remove(slug);
         if (res != null) {
             res.clear();
+        }
+        Path groupDir = dataDir.resolve("samples").resolve(slug);
+        if (Files.isDirectory(groupDir)) {
+            try (Stream<Path> files = Files.list(groupDir)) {
+                files.filter(Files::isRegularFile).forEach(p -> {
+                    try {
+                        Files.deleteIfExists(p);
+                    } catch (IOException ignored) {
+                    }
+                });
+            } catch (IOException ignored) {
+            }
         }
     }
 
