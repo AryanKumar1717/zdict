@@ -378,10 +378,10 @@ class ZstdDictFilterTest {
     void metricsCountersIncreaseAfterCompressedResponse() throws Exception {
         MeterRegistry registry = filter.getMetrics().getRegistry();
 
-        double originalBytesBefore = registry.find("zdict.bytes.original").counter() != null
-                ? registry.find("zdict.bytes.original").counter().count() : 0.0;
-        double compressedBytesBefore = registry.find("zdict.bytes.compressed").counter() != null
-                ? registry.find("zdict.bytes.compressed").counter().count() : 0.0;
+        double originalBytesBefore = registry.find("zdict.bytes.original").tag("path", "/api/products").counter() != null
+                ? registry.find("zdict.bytes.original").tag("path", "/api/products").counter().count() : 0.0;
+        double compressedBytesBefore = registry.find("zdict.bytes.compressed").tag("path", "/api/products").counter() != null
+                ? registry.find("zdict.bytes.compressed").tag("path", "/api/products").counter().count() : 0.0;
         double responsesCompressedBefore = registry.find("zdict.responses")
                 .tag("result", "compressed").counter() != null
                 ? registry.find("zdict.responses").tag("result", "compressed").counter().count() : 0.0;
@@ -394,8 +394,8 @@ class ZstdDictFilterTest {
 
         byte[] compressedBody = result.getResponse().getContentAsByteArray();
 
-        double originalBytesAfter = registry.find("zdict.bytes.original").counter().count();
-        double compressedBytesAfter = registry.find("zdict.bytes.compressed").counter().count();
+        double originalBytesAfter = registry.find("zdict.bytes.original").tag("path", "/api/products").counter().count();
+        double compressedBytesAfter = registry.find("zdict.bytes.compressed").tag("path", "/api/products").counter().count();
         double responsesCompressedAfter = registry.find("zdict.responses")
                 .tag("result", "compressed").counter().count();
 
@@ -405,5 +405,22 @@ class ZstdDictFilterTest {
 
         // Circuit open gauge should be 0.0
         assertThat(registry.find("zdict.circuit.open").gauge().value()).isEqualTo(0.0);
+    }
+
+    @Test
+    void metricsUseGroupKeyInsteadOfRawPath() throws Exception {
+        MeterRegistry registry = filter.getMetrics().getRegistry();
+
+        mockMvc.perform(get("/api/products/42")
+                        .header("X-Dict-Id", dictId))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Encoding", "zstd-dict"));
+
+        var counter = registry.find("zdict.bytes.original")
+                .tag("path", "/api/products/{id}")
+                .counter();
+
+        assertThat(counter).isNotNull();
+        assertThat(counter.count()).isGreaterThan(0.0);
     }
 }

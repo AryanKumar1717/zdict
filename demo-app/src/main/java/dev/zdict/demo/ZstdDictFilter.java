@@ -15,6 +15,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.servlet.HandlerMapping;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
 import java.io.IOException;
@@ -184,6 +185,8 @@ public class ZstdDictFilter extends OncePerRequestFilter {
         ContentCachingResponseWrapper wrappedResponse = new ContentCachingResponseWrapper(response);
         filterChain.doFilter(request, wrappedResponse);
 
+        String groupKey = resolveGroupKey(request);
+
         try {
             // Check status
             if (wrappedResponse.getStatus() != 200) {
@@ -253,8 +256,8 @@ public class ZstdDictFilter extends OncePerRequestFilter {
 
             if (metrics != null) {
                 metrics.recordCompressTime(elapsed);
-                metrics.recordBytesOriginal(uri, body.length);
-                metrics.recordBytesCompressed(uri, compressed.length);
+                metrics.recordBytesOriginal(groupKey, body.length);
+                metrics.recordBytesCompressed(groupKey, compressed.length);
                 metrics.recordResponse("compressed", "none");
             }
 
@@ -330,6 +333,25 @@ public class ZstdDictFilter extends OncePerRequestFilter {
 
     public byte[] getDictBytes() {
         return dictBytes;
+    }
+
+    public static String resolveGroupKey(HttpServletRequest request) {
+        Object pattern = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+        if (pattern != null) {
+            return pattern.toString();
+        }
+        return request.getRequestURI();
+    }
+
+    public static String toGroupSlug(String groupKey) {
+        if (groupKey == null || groupKey.isBlank()) {
+            return "default";
+        }
+        String slug = groupKey.replaceAll("^/+", "").replaceAll("[^a-zA-Z0-9]+", "_");
+        if (slug.endsWith("_")) {
+            slug = slug.substring(0, slug.length() - 1);
+        }
+        return slug.isEmpty() ? "root" : slug;
     }
 
     void setCdictForTesting(ZstdDictCompress cdict) {
