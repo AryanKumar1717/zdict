@@ -312,6 +312,15 @@ class ZstdDictFilterTest {
         assertThat(filter.isEnabled()).isTrue();
     }
 
+    @Test
+    void actuatorTrainEndpointReturnsDecision() throws Exception {
+        mockMvc.perform(post("/actuator/zdict/train")
+                        .param("group", "/api/products"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.decision").exists())
+                .andExpect(jsonPath("$.group").value("/api/products"));
+    }
+
     // ---- Circuit Breaker Tests ----
 
     @Test
