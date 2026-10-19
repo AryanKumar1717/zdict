@@ -44,25 +44,34 @@ public class ZstdDictFilter extends OncePerRequestFilter {
     private final ZdictMetrics metrics;
     private final SampleStore sampleStore;
     private final DictionaryRegistry registry;
+    private final RatioTracker ratioTracker;
 
     private volatile boolean runtimeEnabled = true;
     private ZstdDictCompress testingCdict;
 
     public ZstdDictFilter(ZdictProperties props) {
-        this(props, new ZdictCircuitBreaker(), null, null, null);
+        this(props, new ZdictCircuitBreaker(), null, null, null, null);
     }
 
     public ZstdDictFilter(ZdictProperties props,
                           ZdictCircuitBreaker circuitBreaker,
                           @Nullable ZdictMetrics metrics) {
-        this(props, circuitBreaker, metrics, null, null);
+        this(props, circuitBreaker, metrics, null, null, null);
     }
 
     public ZstdDictFilter(ZdictProperties props,
                           ZdictCircuitBreaker circuitBreaker,
                           @Nullable ZdictMetrics metrics,
                           @Nullable SampleStore sampleStore) {
-        this(props, circuitBreaker, metrics, sampleStore, null);
+        this(props, circuitBreaker, metrics, sampleStore, null, null);
+    }
+
+    public ZstdDictFilter(ZdictProperties props,
+                          ZdictCircuitBreaker circuitBreaker,
+                          @Nullable ZdictMetrics metrics,
+                          @Nullable SampleStore sampleStore,
+                          @Nullable DictionaryRegistry registry) {
+        this(props, circuitBreaker, metrics, sampleStore, registry, null);
     }
 
     @Autowired
@@ -70,12 +79,14 @@ public class ZstdDictFilter extends OncePerRequestFilter {
                           ZdictCircuitBreaker circuitBreaker,
                           @Nullable ZdictMetrics metrics,
                           @Nullable SampleStore sampleStore,
-                          @Nullable DictionaryRegistry registry) {
+                          @Nullable DictionaryRegistry registry,
+                          @Nullable RatioTracker ratioTracker) {
         this.props = props;
         this.circuitBreaker = circuitBreaker != null ? circuitBreaker : new ZdictCircuitBreaker();
         this.metrics = metrics;
         this.sampleStore = sampleStore;
         this.registry = registry;
+        this.ratioTracker = ratioTracker;
     }
 
     public boolean isEnabled() {
@@ -96,6 +107,10 @@ public class ZstdDictFilter extends OncePerRequestFilter {
 
     public DictionaryRegistry getRegistry() {
         return registry;
+    }
+
+    public RatioTracker getRatioTracker() {
+        return ratioTracker;
     }
 
     @PostConstruct
@@ -244,6 +259,9 @@ public class ZstdDictFilter extends OncePerRequestFilter {
                         metrics.recordBytesCompressed(groupKey, compressed.length);
                         metrics.recordResponse("compressed", "none");
                     }
+                    if (ratioTracker != null) {
+                        ratioTracker.recordSuccess(groupKey, dictId, body.length, compressed.length);
+                    }
 
                     response.setContentLength(compressed.length);
                     response.setHeader("Content-Encoding", "zstd-dict");
@@ -256,6 +274,9 @@ public class ZstdDictFilter extends OncePerRequestFilter {
                     circuitBreaker.recordFailure(elapsed);
                     if (metrics != null) {
                         metrics.recordResponse("failed", "compression_error");
+                    }
+                    if (ratioTracker != null) {
+                        ratioTracker.recordFailure(groupKey, dictId);
                     }
                     log.warn("zstd compression failed, sending uncompressed: {}", e.getMessage());
                     wrappedResponse.copyBodyToResponse();

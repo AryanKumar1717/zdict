@@ -31,6 +31,7 @@ public class DictionaryRegistry implements Closeable {
 
     private final Path dataDir;
     private final ObjectMapper mapper;
+    private final java.time.Clock clock;
 
     // slug -> list of versions sorted newest to oldest
     private final ConcurrentHashMap<String, List<DictionaryVersion>> groupVersions = new ConcurrentHashMap<>();
@@ -38,17 +39,22 @@ public class DictionaryRegistry implements Closeable {
     private final ConcurrentHashMap<String, DictionaryVersion> versionsById = new ConcurrentHashMap<>();
 
     @Autowired
-    public DictionaryRegistry(ZdictProperties props) {
-        this(Path.of(props.getDataDir()));
+    public DictionaryRegistry(ZdictProperties props, @Autowired(required = false) java.time.Clock clock) {
+        this(Path.of(props.getDataDir()), createDefaultMapper(), clock != null ? clock : java.time.Clock.systemUTC());
     }
 
     public DictionaryRegistry(Path dataDir) {
-        this(dataDir, createDefaultMapper());
+        this(dataDir, createDefaultMapper(), java.time.Clock.systemUTC());
     }
 
     public DictionaryRegistry(Path dataDir, ObjectMapper mapper) {
+        this(dataDir, mapper, java.time.Clock.systemUTC());
+    }
+
+    public DictionaryRegistry(Path dataDir, ObjectMapper mapper, java.time.Clock clock) {
         this.dataDir = dataDir;
-        this.mapper = mapper;
+        this.mapper = mapper != null ? mapper : createDefaultMapper();
+        this.clock = clock != null ? clock : java.time.Clock.systemUTC();
     }
 
     private static ObjectMapper createDefaultMapper() {
@@ -89,6 +95,10 @@ public class DictionaryRegistry implements Closeable {
             files.filter(p -> p.getFileName().toString().endsWith(".json")).forEach(jsonFile -> {
                 try {
                     DictionaryMetadata meta = mapper.readValue(jsonFile.toFile(), DictionaryMetadata.class);
+                    if (meta.getBaseline() <= 0.0) {
+                        double b = (meta.getHoldoutRatio() > 0 && meta.getHoldoutRatio() < 1.0) ? (1.0 / meta.getHoldoutRatio()) : meta.getHoldoutRatio();
+                        meta.setBaseline(b);
+                    }
                     String id = meta.getId();
                     Path dictFile = groupDir.resolve(id + ".dict");
                     if (Files.isRegularFile(dictFile)) {
@@ -171,6 +181,11 @@ public class DictionaryRegistry implements Closeable {
      * Demotes any existing ACTIVE version to RETIRED and enforces retention limit of 3.
      */
     public synchronized DictionaryVersion register(String group, byte[] dictBytes, int sampleCount, double holdoutRatio) throws IOException {
+        double baseline = (holdoutRatio > 0 && holdoutRatio < 1.0) ? (1.0 / holdoutRatio) : holdoutRatio;
+        return register(group, dictBytes, sampleCount, holdoutRatio, baseline);
+    }
+
+    public synchronized DictionaryVersion register(String group, byte[] dictBytes, int sampleCount, double holdoutRatio, double baseline) throws IOException {
         String slug = ZstdDictFilter.toGroupSlug(group);
         String id = ZstdDictFilter.computeDictId(dictBytes);
 
@@ -195,10 +210,11 @@ public class DictionaryRegistry implements Closeable {
         DictionaryMetadata newMeta = new DictionaryMetadata(
                 id,
                 group,
-                Instant.now().toString(),
+                Instant.now(clock).toString(),
                 sampleCount,
                 dictBytes.length,
                 holdoutRatio,
+                baseline,
                 "ACTIVE"
         );
         saveMetadata(slug, newMeta);

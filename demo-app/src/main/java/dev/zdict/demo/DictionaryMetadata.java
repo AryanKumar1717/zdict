@@ -14,6 +14,7 @@ public class DictionaryMetadata {
     private int sampleCount;
     private int dictSize;
     private double holdoutRatio;
+    private double baseline;
     private String state; // ACTIVE, RETIRED
 
     public DictionaryMetadata() {
@@ -21,12 +22,19 @@ public class DictionaryMetadata {
 
     public DictionaryMetadata(String id, String group, String createdAt, int sampleCount,
                               int dictSize, double holdoutRatio, String state) {
+        this(id, group, createdAt, sampleCount, dictSize, holdoutRatio,
+                holdoutRatio > 0 && holdoutRatio < 1.0 ? (1.0 / holdoutRatio) : holdoutRatio, state);
+    }
+
+    public DictionaryMetadata(String id, String group, String createdAt, int sampleCount,
+                              int dictSize, double holdoutRatio, double baseline, String state) {
         this.id = id;
         this.group = group;
         this.createdAt = createdAt;
         this.sampleCount = sampleCount;
         this.dictSize = dictSize;
         this.holdoutRatio = holdoutRatio;
+        this.baseline = baseline;
         this.state = state;
     }
 
@@ -76,6 +84,14 @@ public class DictionaryMetadata {
 
     public void setHoldoutRatio(double holdoutRatio) {
         this.holdoutRatio = holdoutRatio;
+    }
+
+    public double getBaseline() {
+        return baseline;
+    }
+
+    public void setBaseline(double baseline) {
+        this.baseline = baseline;
     }
 
     public String getState() {

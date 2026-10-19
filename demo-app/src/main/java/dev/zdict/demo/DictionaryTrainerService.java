@@ -95,6 +95,7 @@ public class DictionaryTrainerService {
         double plainRatio = (double) plainCompBytes / origHoldoutBytes;
         double candidateRatio = (double) candidateCompBytes / origHoldoutBytes;
         Double activeRatio = (activeVersion != null) ? (double) activeCompBytes / origHoldoutBytes : null;
+        double baselineRatio = candidateCompBytes > 0 ? (double) origHoldoutBytes / candidateCompBytes : 1.0;
 
         TrainResult result = new TrainResult();
         result.setGroup(group);
@@ -108,7 +109,7 @@ public class DictionaryTrainerService {
 
         if (activeVersion == null) {
             // First dictionary: automatically promote
-            registry.register(group, candidateBytes, sampleCount, candidateRatio);
+            registry.register(group, candidateBytes, sampleCount, candidateRatio, baselineRatio);
             result.setPromoted(true);
             result.setDecision("PROMOTED_FIRST_ACTIVE");
             result.setReason("No active dictionary existed for group; promoted as initial ACTIVE version");
@@ -118,7 +119,7 @@ public class DictionaryTrainerService {
             // Promotion requires beating active dictionary by >= 5%
             double improvement = (activeRatio - candidateRatio) / activeRatio;
             if (improvement >= 0.05) {
-                registry.register(group, candidateBytes, sampleCount, candidateRatio);
+                registry.register(group, candidateBytes, sampleCount, candidateRatio, baselineRatio);
                 result.setPromoted(true);
                 result.setDecision("PROMOTED_BEAT_ACTIVE");
                 result.setReason(String.format("Candidate beat active dictionary (%s) by %.2f%% (>= 5%% required)",

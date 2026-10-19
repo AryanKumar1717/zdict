@@ -29,6 +29,9 @@ public class ZdictProperties {
 
     private Sample sample = new Sample();
     private Train train = new Train();
+    private Drift drift = new Drift();
+    private AutoLearning autoLearning = new AutoLearning();
+    private Canary canary = new Canary();
 
     public static class Sample {
         private int perGroupMax = 2000;
@@ -54,6 +57,7 @@ public class ZdictProperties {
     public static class Train {
         private int minSamples = 200;
         private int dictSize = 16 * 1024; // 16 KB
+        private java.time.Duration cooldown = java.time.Duration.ofMinutes(15);
 
         public int getMinSamples() {
             return minSamples;
@@ -69,6 +73,95 @@ public class ZdictProperties {
 
         public void setDictSize(int dictSize) {
             this.dictSize = dictSize;
+        }
+
+        public java.time.Duration getCooldown() {
+            return cooldown;
+        }
+
+        public void setCooldown(java.time.Duration cooldown) {
+            this.cooldown = cooldown;
+        }
+    }
+
+    public static class Drift {
+        private double threshold = 0.15;
+        private int minResponses = 200;
+        private int windowSize = 500;
+
+        public double getThreshold() {
+            return threshold;
+        }
+
+        public void setThreshold(double threshold) {
+            this.threshold = threshold;
+        }
+
+        public int getMinResponses() {
+            return minResponses;
+        }
+
+        public void setMinResponses(int minResponses) {
+            this.minResponses = minResponses;
+        }
+
+        public int getWindowSize() {
+            return windowSize;
+        }
+
+        public void setWindowSize(int windowSize) {
+            this.windowSize = windowSize;
+        }
+    }
+
+    public static class AutoLearning {
+        private boolean enabled = false;
+        private java.time.Duration interval = java.time.Duration.ofMinutes(1);
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public java.time.Duration getInterval() {
+            return interval;
+        }
+
+        public void setInterval(java.time.Duration interval) {
+            this.interval = interval;
+        }
+    }
+
+    public static class Canary {
+        private int percent = 5;
+        private int minResponses = 300;
+        private java.time.Duration maxDuration = java.time.Duration.ofMinutes(30);
+
+        public int getPercent() {
+            return percent;
+        }
+
+        public void setPercent(int percent) {
+            this.percent = percent;
+        }
+
+        public int getMinResponses() {
+            return minResponses;
+        }
+
+        public void setMinResponses(int minResponses) {
+            this.minResponses = minResponses;
+        }
+
+        public java.time.Duration getMaxDuration() {
+            return maxDuration;
+        }
+
+        public void setMaxDuration(java.time.Duration maxDuration) {
+            this.maxDuration = maxDuration;
         }
     }
 
@@ -153,5 +246,29 @@ public class ZdictProperties {
 
     public void setTrain(Train train) {
         this.train = train;
+    }
+
+    public Drift getDrift() {
+        return drift;
+    }
+
+    public void setDrift(Drift drift) {
+        this.drift = drift;
+    }
+
+    public AutoLearning getAutoLearning() {
+        return autoLearning;
+    }
+
+    public void setAutoLearning(AutoLearning autoLearning) {
+        this.autoLearning = autoLearning;
+    }
+
+    public Canary getCanary() {
+        return canary;
+    }
+
+    public void setCanary(Canary canary) {
+        this.canary = canary;
     }
 }
