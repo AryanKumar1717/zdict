@@ -135,23 +135,30 @@ public class DictionaryRegistry implements Closeable {
             bytesMap.remove(oldest.getId());
         }
 
-        // Enforce exactly one ACTIVE per group
+        // Enforce at most one ACTIVE and at most one CANARY per group
         int activeIdx = -1;
+        int canaryIdx = -1;
         for (int i = 0; i < metaList.size(); i++) {
-            if (metaList.get(i).isActive()) {
+            DictionaryMetadata m = metaList.get(i);
+            if (m.isActive()) {
                 if (activeIdx == -1) {
-                    activeIdx = i; // keep the newest active
+                    activeIdx = i; // keep newest active
                 } else {
-                    // Demote older active to retired
-                    DictionaryMetadata demoted = metaList.get(i);
-                    demoted.setState("RETIRED");
-                    saveMetadata(slug, demoted);
+                    m.setState("RETIRED");
+                    saveMetadata(slug, m);
+                }
+            } else if (m.isCanary()) {
+                if (canaryIdx == -1) {
+                    canaryIdx = i; // keep newest canary
+                } else {
+                    m.setState("RETIRED");
+                    saveMetadata(slug, m);
                 }
             }
         }
 
-        if (activeIdx == -1 && !metaList.isEmpty()) {
-            // No active version found; promote newest
+        if (activeIdx == -1 && canaryIdx == -1 && !metaList.isEmpty()) {
+            // No active or canary found; promote newest
             DictionaryMetadata promoted = metaList.get(0);
             promoted.setState("ACTIVE");
             saveMetadata(slug, promoted);
@@ -166,6 +173,8 @@ public class DictionaryRegistry implements Closeable {
             DictionaryVersion v;
             if (i == activeIdx) {
                 v = DictionaryVersion.createActive(meta, bytes, COMPRESSION_LEVEL);
+            } else if (i == canaryIdx) {
+                v = DictionaryVersion.createCanary(meta, bytes, COMPRESSION_LEVEL);
             } else {
                 v = DictionaryVersion.createRetired(meta, bytes);
             }
@@ -268,6 +277,117 @@ public class DictionaryRegistry implements Closeable {
             }
         }
         return null;
+    }
+
+    /**
+     * Get the canary dictionary for an endpoint group, if one exists.
+     */
+    public DictionaryVersion getCanary(String group) {
+        String slug = ZstdDictFilter.toGroupSlug(group);
+        List<DictionaryVersion> list = groupVersions.get(slug);
+        if (list == null || list.isEmpty()) {
+            return null;
+        }
+        for (DictionaryVersion v : list) {
+            if (v.isCanary()) {
+                return v;
+            }
+        }
+        return null;
+    }
+
+    public synchronized DictionaryVersion registerCanary(String group, byte[] dictBytes, int sampleCount, double holdoutRatio) throws IOException {
+        double baseline = (holdoutRatio > 0 && holdoutRatio < 1.0) ? (1.0 / holdoutRatio) : holdoutRatio;
+        return registerCanary(group, dictBytes, sampleCount, holdoutRatio, baseline);
+    }
+
+    public synchronized DictionaryVersion registerCanary(String group, byte[] dictBytes, int sampleCount, double holdoutRatio, double baseline) throws IOException {
+        String slug = ZstdDictFilter.toGroupSlug(group);
+        String id = ZstdDictFilter.computeDictId(dictBytes);
+
+        Path groupDir = dataDir.resolve("dicts").resolve(slug);
+        Files.createDirectories(groupDir);
+
+        Path dictFile = groupDir.resolve(id + ".dict");
+        Files.write(dictFile, dictBytes);
+
+        List<DictionaryVersion> currentList = groupVersions.computeIfAbsent(slug, k -> new ArrayList<>());
+
+        // Demote previous canary version if any (at most one canary per group)
+        for (DictionaryVersion existing : currentList) {
+            if (existing.isCanary()) {
+                existing.retire("superseded by new canary candidate");
+                saveMetadata(slug, existing.getMetadata());
+            }
+        }
+
+        DictionaryMetadata newMeta = new DictionaryMetadata(
+                id,
+                group,
+                Instant.now(clock).toString(),
+                sampleCount,
+                dictBytes.length,
+                holdoutRatio,
+                baseline,
+                "CANARY"
+        );
+        saveMetadata(slug, newMeta);
+
+        DictionaryVersion newVersion = DictionaryVersion.createCanary(newMeta, dictBytes, COMPRESSION_LEVEL);
+        currentList.add(0, newVersion);
+        versionsById.put(id, newVersion);
+
+        // Enforce retention limit of 3 versions
+        while (currentList.size() > MAX_VERSIONS_PER_GROUP) {
+            DictionaryVersion removed = currentList.remove(currentList.size() - 1);
+            versionsById.remove(removed.getId());
+            removed.close();
+            deleteFromDisk(slug, removed.getId());
+        }
+
+        return newVersion;
+    }
+
+    public synchronized boolean promoteCanary(String group) {
+        String slug = ZstdDictFilter.toGroupSlug(group);
+        List<DictionaryVersion> currentList = groupVersions.get(slug);
+        if (currentList == null) return false;
+
+        DictionaryVersion canary = null;
+        DictionaryVersion active = null;
+        for (DictionaryVersion v : currentList) {
+            if (v.isCanary()) {
+                canary = v;
+            } else if (v.isActive()) {
+                active = v;
+            }
+        }
+
+        if (canary == null) return false;
+
+        if (active != null) {
+            active.retire();
+            saveMetadata(slug, active.getMetadata());
+        }
+
+        canary.promoteToActive();
+        saveMetadata(slug, canary.getMetadata());
+        return true;
+    }
+
+    public synchronized boolean rollbackCanary(String group, String reason) {
+        String slug = ZstdDictFilter.toGroupSlug(group);
+        List<DictionaryVersion> currentList = groupVersions.get(slug);
+        if (currentList == null) return false;
+
+        for (DictionaryVersion v : currentList) {
+            if (v.isCanary()) {
+                v.retire(reason);
+                saveMetadata(slug, v.getMetadata());
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

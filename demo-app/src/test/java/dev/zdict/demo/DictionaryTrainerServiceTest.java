@@ -99,10 +99,9 @@ class DictionaryTrainerServiceTest {
         registry.register(group, poorDict, 50, 0.99);
         assertThat(registry.getActive(group).getId()).isNotEqualTo(initialId);
 
-        // Retraining on the rich samples should beat the poor dictionary significantly and promote
+        // Retraining on the rich samples should beat the poor dictionary significantly and register as CANARY
         TrainResult thirdTrain = trainerService.train(group);
-        assertThat(thirdTrain.isPromoted()).isTrue();
-        assertThat(thirdTrain.getDecision()).isEqualTo("PROMOTED_BEAT_ACTIVE");
-        assertThat(registry.getActive(group).getId()).isEqualTo(thirdTrain.getDictionaryId());
+        assertThat(thirdTrain.getDecision()).isEqualTo("CANARY_STARTED");
+        assertThat(registry.getCanary(group).getId()).isEqualTo(thirdTrain.getDictionaryId());
     }
 }

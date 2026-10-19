@@ -47,7 +47,12 @@ public class ZstdDictFilter extends OncePerRequestFilter {
     private final RatioTracker ratioTracker;
 
     private volatile boolean runtimeEnabled = true;
+    private volatile Random random = new Random();
     private ZstdDictCompress testingCdict;
+
+    public void setRandom(Random random) {
+        this.random = random != null ? random : new Random();
+    }
 
     public ZstdDictFilter(ZdictProperties props) {
         this(props, new ZdictCircuitBreaker(), null, null, null, null);
@@ -237,16 +242,34 @@ public class ZstdDictFilter extends OncePerRequestFilter {
                 return;
             }
 
-            // Active dictionary lookup for this group
+            // Active and Canary dictionary lookup for this group
             DictionaryVersion activeDict = (registry != null) ? registry.getActive(groupKey) : null;
-            ZstdDictCompress cdict = (testingCdict != null) ? testingCdict : ((activeDict != null) ? activeDict.getCdict() : null);
-            String dictId = (activeDict != null) ? activeDict.getId() : (testingCdict != null ? "testdict" : null);
+            DictionaryVersion canaryDict = (registry != null) ? registry.getCanary(groupKey) : null;
+
+            Set<String> clientDictIds = getClientDictIds(request);
+            boolean clientHasCanary = (canaryDict != null) && clientDictIds.contains(canaryDict.getId());
+            boolean clientHasActive = (activeDict != null) && clientDictIds.contains(activeDict.getId());
+
+            int canaryPercent = props.getCanary().getPercent();
+            boolean isCanaryRoll = (random.nextInt(100) < canaryPercent);
+
+            DictionaryVersion chosenDict = null;
+            if (testingCdict != null) {
+                if (clientDictIds.contains("testdict")) {
+                    chosenDict = null; // testing override
+                }
+            } else if (clientHasCanary && isCanaryRoll) {
+                chosenDict = canaryDict;
+            } else if (clientHasActive) {
+                chosenDict = activeDict;
+            }
+
+            ZstdDictCompress cdict = (testingCdict != null) ? testingCdict : ((chosenDict != null) ? chosenDict.getCdict() : null);
+            String dictId = (chosenDict != null) ? chosenDict.getId() : (testingCdict != null && clientDictIds.contains("testdict") ? "testdict" : null);
 
             boolean canCompress = isEnabled() && cdict != null && !circuitBreaker.isOpen();
-            Set<String> clientDictIds = getClientDictIds(request);
-            boolean clientMatches = dictId != null && clientDictIds.contains(dictId);
 
-            if (canCompress && clientMatches) {
+            if (canCompress && dictId != null) {
                 long start = System.nanoTime();
                 try {
                     byte[] compressed = Zstd.compress(body, cdict);
@@ -267,6 +290,12 @@ public class ZstdDictFilter extends OncePerRequestFilter {
                     response.setHeader("Content-Encoding", "zstd-dict");
                     response.setHeader("X-Dict-Id", dictId);
                     response.setHeader("Vary", "X-Dict-Ids, Accept-Encoding");
+
+                    // For roughly the same percent of requests where client lacks canary id, send X-Dict-Available
+                    if (canaryDict != null && !clientHasCanary && isCanaryRoll) {
+                        response.setHeader("X-Dict-Available", canaryDict.getId());
+                    }
+
                     response.getOutputStream().write(compressed);
                     response.getOutputStream().flush();
                 } catch (Exception e) {
@@ -282,7 +311,7 @@ public class ZstdDictFilter extends OncePerRequestFilter {
                     wrappedResponse.copyBodyToResponse();
                 }
             } else {
-                if (!isEnabled() || cdict == null) {
+                if (!isEnabled() || (activeDict == null && canaryDict == null && testingCdict == null)) {
                     recordSkipped("disabled");
                 } else if (circuitBreaker.isOpen()) {
                     recordSkipped("circuit_open");
@@ -292,10 +321,12 @@ public class ZstdDictFilter extends OncePerRequestFilter {
                     recordSkipped("wrong_dict_id");
                 }
 
-                // If active dictionary exists but client didn't supply it, send hint header
-                if (dictId != null) {
-                    response.setHeader("X-Dict-Available", dictId);
-                    response.setHeader("X-Dict-Id", dictId); // for backward compatibility
+                // If canary exists and client lacks it, send canary hint on canary roll; else send active hint
+                if (canaryDict != null && !clientHasCanary && isCanaryRoll) {
+                    response.setHeader("X-Dict-Available", canaryDict.getId());
+                } else if (activeDict != null) {
+                    response.setHeader("X-Dict-Available", activeDict.getId());
+                    response.setHeader("X-Dict-Id", activeDict.getId()); // for backward compatibility
                 }
                 wrappedResponse.copyBodyToResponse();
             }

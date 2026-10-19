@@ -78,6 +78,8 @@ public class DictionaryMetadata {
         this.dictSize = dictSize;
     }
 
+    private String rejectionReason;
+
     public double getHoldoutRatio() {
         return holdoutRatio;
     }
@@ -102,7 +104,23 @@ public class DictionaryMetadata {
         this.state = state;
     }
 
+    public String getRejectionReason() {
+        return rejectionReason;
+    }
+
+    public void setRejectionReason(String rejectionReason) {
+        this.rejectionReason = rejectionReason;
+    }
+
     public boolean isActive() {
         return "ACTIVE".equalsIgnoreCase(state);
+    }
+
+    public boolean isCanary() {
+        return "CANARY".equalsIgnoreCase(state);
+    }
+
+    public boolean isRetired() {
+        return "RETIRED".equalsIgnoreCase(state);
     }
 }

@@ -91,7 +91,20 @@ public class AutoTrainerService {
 
         synchronized (lock) {
             Instant now = Instant.now(clock);
+            DictionaryVersion canary = registry != null ? registry.getCanary(group) : null;
             DictionaryVersion active = registry != null ? registry.getActive(group) : null;
+
+            if (canary != null) {
+                evaluateCanary(group, slug, canary, active, now);
+                canary = registry != null ? registry.getCanary(group) : null;
+                active = registry != null ? registry.getActive(group) : null;
+            }
+
+            if (canary != null) {
+                // Ongoing canary evaluation in progress; at most one CANARY per group
+                return;
+            }
+
             boolean drifting = (active != null) && (ratioTracker != null) && ratioTracker.isDrifting(group);
 
             if (active == null) {
@@ -120,7 +133,7 @@ public class AutoTrainerService {
                 if (sampleCount >= minSamples) {
                     if (!isInCooldown(slug, now)) {
                         TrainResult res = trainGroup(group, slug, now);
-                        if (res != null && res.isPromoted()) {
+                        if (res != null && (res.isPromoted() || "CANARY_STARTED".equals(res.getDecision()))) {
                             driftClearedGroups.remove(slug);
                         }
                     } else {
@@ -131,6 +144,61 @@ public class AutoTrainerService {
                 // Not drifting and has active dict
                 driftClearedGroups.remove(slug);
             }
+        }
+    }
+
+    public void evaluateCanary(String group) {
+        if (group == null || registry == null) return;
+        String slug = ZstdDictFilter.toGroupSlug(group);
+        Object lock = groupLocks.computeIfAbsent(slug, k -> new Object());
+        synchronized (lock) {
+            Instant now = Instant.now(clock);
+            DictionaryVersion canary = registry.getCanary(group);
+            DictionaryVersion active = registry.getActive(group);
+            if (canary != null) {
+                evaluateCanary(group, slug, canary, active, now);
+            }
+        }
+    }
+
+    private void evaluateCanary(String group, String slug, DictionaryVersion canary, DictionaryVersion active, Instant now) {
+        int canaryResponses = ratioTracker != null ? ratioTracker.getResponseCount(group, canary.getId()) : 0;
+        int minResponses = props.getCanary().getMinResponses();
+
+        Instant createdAt;
+        try {
+            createdAt = Instant.parse(canary.getMetadata().getCreatedAt());
+        } catch (Exception e) {
+            createdAt = now;
+        }
+
+        Duration elapsed = Duration.between(createdAt, now);
+        Duration maxDuration = props.getCanary().getMaxDuration();
+
+        if (canaryResponses >= minResponses) {
+            double canaryMean = ratioTracker != null ? ratioTracker.getRollingMean(group, canary.getId()) : 0.0;
+            double activeMean = (active != null && ratioTracker != null) ? ratioTracker.getRollingMean(group, active.getId()) : 0.0;
+            double canaryFailRate = ratioTracker != null ? ratioTracker.getFailureRate(group, canary.getId()) : 0.0;
+            double activeFailRate = (active != null && ratioTracker != null) ? ratioTracker.getFailureRate(group, active.getId()) : 0.0;
+
+            if (canaryMean >= activeMean * 1.03 && canaryFailRate <= activeFailRate) {
+                registry.promoteCanary(group);
+                log.info("Canary {} PROMOTED to ACTIVE for group '{}': canaryMean={:.4f}, activeMean={:.4f}, canaryFailRate={:.4f}, activeFailRate={:.4f}",
+                        canary.getId(), group, canaryMean, activeMean, canaryFailRate, activeFailRate);
+            } else {
+                String reason;
+                if (canaryMean < activeMean * 1.03) {
+                    reason = String.format("canary ratio (%.4f) did not beat active (%.4f) by 3%%", canaryMean, activeMean);
+                } else {
+                    reason = String.format("canary failure rate (%.4f) exceeded active (%.4f)", canaryFailRate, activeFailRate);
+                }
+                registry.rollbackCanary(group, reason);
+                log.info("Canary {} ROLLED_BACK for group '{}': {}", canary.getId(), group, reason);
+            }
+        } else if (elapsed.compareTo(maxDuration) >= 0) {
+            registry.rollbackCanary(group, "insufficient traffic");
+            log.info("Canary {} ROLLED_BACK for group '{}' due to timeout: insufficient traffic ({}/{} responses after {})",
+                    canary.getId(), group, canaryResponses, minResponses, elapsed);
         }
     }
 

@@ -28,6 +28,12 @@ public class DictionaryVersion implements Closeable {
         return new DictionaryVersion(metadata, bytes, c, d);
     }
 
+    public static DictionaryVersion createCanary(DictionaryMetadata metadata, byte[] bytes, int level) {
+        ZstdDictCompress c = new ZstdDictCompress(bytes, level);
+        ZstdDictDecompress d = new ZstdDictDecompress(bytes);
+        return new DictionaryVersion(metadata, bytes, c, d);
+    }
+
     public static DictionaryVersion createRetired(DictionaryMetadata metadata, byte[] bytes) {
         ZstdDictDecompress d = new ZstdDictDecompress(bytes);
         return new DictionaryVersion(metadata, bytes, null, d);
@@ -53,6 +59,14 @@ public class DictionaryVersion implements Closeable {
         return metadata.isActive();
     }
 
+    public boolean isCanary() {
+        return metadata.isCanary();
+    }
+
+    public boolean isRetired() {
+        return metadata.isRetired();
+    }
+
     public byte[] getDictBytes() {
         return dictBytes;
     }
@@ -65,8 +79,19 @@ public class DictionaryVersion implements Closeable {
         return ddict;
     }
 
+    public synchronized void promoteToActive() {
+        metadata.setState("ACTIVE");
+    }
+
     public synchronized void retire() {
+        retire(null);
+    }
+
+    public synchronized void retire(String reason) {
         metadata.setState("RETIRED");
+        if (reason != null) {
+            metadata.setRejectionReason(reason);
+        }
         if (cdict != null) {
             try {
                 cdict.close();

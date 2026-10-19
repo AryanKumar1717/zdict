@@ -119,12 +119,12 @@ public class DictionaryTrainerService {
             // Promotion requires beating active dictionary by >= 5%
             double improvement = (activeRatio - candidateRatio) / activeRatio;
             if (improvement >= 0.05) {
-                registry.register(group, candidateBytes, sampleCount, candidateRatio, baselineRatio);
-                result.setPromoted(true);
-                result.setDecision("PROMOTED_BEAT_ACTIVE");
-                result.setReason(String.format("Candidate beat active dictionary (%s) by %.2f%% (>= 5%% required)",
+                registry.registerCanary(group, candidateBytes, sampleCount, candidateRatio, baselineRatio);
+                result.setPromoted(false);
+                result.setDecision("CANARY_STARTED");
+                result.setReason(String.format("Candidate beat active dictionary (%s) by %.2f%% (>= 5%% required); registered as CANARY",
                         activeVersion.getId(), improvement * 100));
-                log.info("Promoted dictionary {} for group '{}' beating active {} by {:.2f}% (active: {:.4f}, new: {:.4f})",
+                log.info("Registered dictionary {} as CANARY for group '{}' beating active {} by {:.2f}% (active: {:.4f}, new: {:.4f})",
                         candidateId, group, activeVersion.getId(), improvement * 100, activeRatio, candidateRatio);
             } else {
                 result.setPromoted(false);
