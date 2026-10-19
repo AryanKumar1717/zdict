@@ -10,27 +10,29 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Serves the raw dictionary bytes so clients can download them.
+ * Serves raw dictionary bytes by ID for any stored version (ACTIVE or RETIRED).
  * GET /zdict/dictionary/{id} -> dictionary bytes or 404.
  */
 @RestController
 @RequestMapping("/zdict/dictionary")
 public class DictionaryController {
 
-    private final ZstdDictFilter filter;
+    private final DictionaryRegistry registry;
 
-    public DictionaryController(ZstdDictFilter filter) {
-        this.filter = filter;
+    public DictionaryController(DictionaryRegistry registry) {
+        this.registry = registry;
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<byte[]> getDictionary(@PathVariable String id) {
-        if (filter.getDictId() == null || !filter.getDictId().equals(id)) {
+        DictionaryVersion v = registry.getById(id);
+        if (v == null || v.getDictBytes() == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
+        byte[] bytes = v.getDictBytes();
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
-        headers.setContentLength(filter.getDictBytes().length);
-        return new ResponseEntity<>(filter.getDictBytes(), headers, HttpStatus.OK);
+        headers.setContentLength(bytes.length);
+        return new ResponseEntity<>(bytes, headers, HttpStatus.OK);
     }
 }

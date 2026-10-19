@@ -93,6 +93,7 @@ class ZstdDictFilterTest {
     static void configureProperties(DynamicPropertyRegistry registry) {
         registry.add("zdict.enabled", () -> "true");
         registry.add("zdict.dictionary-path", () -> tempDir.resolve("test.dict").toString());
+        registry.add("zdict.data-dir", () -> tempDir.resolve("zdict-data").toString());
         registry.add("zdict.paths", () -> "/api/products");
         registry.add("management.endpoints.web.exposure.include", () -> "*");
     }
@@ -202,8 +203,8 @@ class ZstdDictFilterTest {
             assertThat(body).contains("\"status\":\"ok\"");
             assertThat(body).contains("\"items\":[");
         } finally {
-            // Restore a valid compressor
-            filter.setCdictForTesting(new ZstdDictCompress(dictBytes, 3));
+            // Restore normal behavior
+            filter.setCdictForTesting(null);
         }
     }
 

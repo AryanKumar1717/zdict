@@ -15,7 +15,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * HTTP client that negotiates and decompresses zstd dictionary responses.
+ * HTTP client that holds multiple dictionaries by id, negotiates via X-Dict-Ids,
+ * fetches dictionaries announced via X-Dict-Available, and decompresses by response X-Dict-Id.
  */
 public class ZdictClient implements AutoCloseable {
 
@@ -23,7 +24,6 @@ public class ZdictClient implements AutoCloseable {
 
     private final HttpClient httpClient;
     private final Map<String, ZstdDictDecompress> dictCache = new ConcurrentHashMap<>();
-    private final Map<String, String> hostToDictId = new ConcurrentHashMap<>();
 
     public ZdictClient() {
         this(HttpClient.newHttpClient());
@@ -39,47 +39,48 @@ public class ZdictClient implements AutoCloseable {
 
     public ZdictResponse get(URI uri) throws IOException, InterruptedException {
         HttpRequest.Builder builder = HttpRequest.newBuilder(uri).GET();
-        String host = uri.getAuthority();
-        if (host != null) {
-            String cachedDictId = hostToDictId.get(host);
-            if (cachedDictId != null && dictCache.containsKey(cachedDictId)) {
-                builder.header("X-Dict-Id", cachedDictId);
-            }
-        }
+        attachDictIdsHeader(builder);
         return send(builder.build());
     }
 
     public ZdictResponse send(HttpRequest request) throws IOException, InterruptedException {
-        URI uri = request.uri();
-        String host = uri.getAuthority();
-
-        // If the request doesn't explicitly have X-Dict-Id, attach cached one if known
         HttpRequest actualRequest = request;
-        if (request.headers().firstValue("X-Dict-Id").isEmpty() && host != null) {
-            String cachedDictId = hostToDictId.get(host);
-            if (cachedDictId != null && dictCache.containsKey(cachedDictId)) {
-                HttpRequest.Builder builder = copyRequest(request);
-                builder.header("X-Dict-Id", cachedDictId);
-                actualRequest = builder.build();
-            }
+        if (request.headers().firstValue("X-Dict-Ids").isEmpty() && !dictCache.isEmpty()) {
+            HttpRequest.Builder builder = copyRequest(request);
+            attachDictIdsHeader(builder);
+            actualRequest = builder.build();
         }
 
         HttpResponse<byte[]> response = httpClient.send(actualRequest, HttpResponse.BodyHandlers.ofByteArray());
+        URI uri = actualRequest.uri();
 
-        // Check if server advertises a dictionary ID
-        String respDictId = response.headers().firstValue("X-Dict-Id").orElse(null);
-        if (respDictId != null && !dictCache.containsKey(respDictId)) {
-            fetchAndCacheDictionary(uri, host, respDictId);
+        // 1. Check if server signals a new dictionary is available
+        String availableId = response.headers().firstValue("X-Dict-Available").orElse(null);
+        if (availableId != null && !dictCache.containsKey(availableId)) {
+            fetchAndCacheDictionary(uri, availableId);
         }
 
-        // Check if response is compressed with zstd-dict
+        // Backward compatibility: also check legacy X-Dict-Id header on uncompressed responses
+        String respDictId = response.headers().firstValue("X-Dict-Id").orElse(null);
         boolean isZstdDict = response.headers().firstValue("Content-Encoding")
                 .map("zstd-dict"::equalsIgnoreCase)
                 .orElse(false);
 
+        if (!isZstdDict && respDictId != null && !dictCache.containsKey(respDictId)) {
+            fetchAndCacheDictionary(uri, respDictId);
+        }
+
         byte[] rawBytes = response.body();
+
+        // 2. If compressed with zstd-dict, decode using the dictionary specified in X-Dict-Id
         if (isZstdDict && respDictId != null) {
             ZstdDictDecompress ddict = dictCache.get(respDictId);
+            if (ddict == null) {
+                // Fetch on demand if somehow missing
+                fetchAndCacheDictionary(uri, respDictId);
+                ddict = dictCache.get(respDictId);
+            }
+
             if (ddict != null) {
                 try {
                     long decompressedSize = Zstd.decompressedSize(rawBytes);
@@ -87,16 +88,26 @@ public class ZdictClient implements AutoCloseable {
                     String body = new String(decompressed, StandardCharsets.UTF_8);
                     return new ZdictResponse(response.statusCode(), body, rawBytes, true, response);
                 } catch (Exception e) {
-                    log.warn("Failed to decompress zstd-dict response: {}", e.getMessage());
+                    log.warn("Failed to decompress zstd-dict response with dict {}: {}", respDictId, e.getMessage());
                 }
+            } else {
+                log.warn("Missing dictionary {} for zstd-dict response, falling back to raw body", respDictId);
             }
         }
 
+        // Fall back to plain string
         String body = new String(rawBytes, StandardCharsets.UTF_8);
         return new ZdictResponse(response.statusCode(), body, rawBytes, false, response);
     }
 
-    private void fetchAndCacheDictionary(URI baseUri, String host, String dictId) {
+    private void attachDictIdsHeader(HttpRequest.Builder builder) {
+        if (!dictCache.isEmpty()) {
+            String ids = String.join(", ", dictCache.keySet());
+            builder.header("X-Dict-Ids", ids);
+        }
+    }
+
+    private void fetchAndCacheDictionary(URI baseUri, String dictId) {
         try {
             URI dictUri = baseUri.resolve("/zdict/dictionary/" + dictId);
             HttpRequest dictReq = HttpRequest.newBuilder(dictUri).GET().build();
@@ -104,15 +115,11 @@ public class ZdictClient implements AutoCloseable {
             if (dictResp.statusCode() == 200 && dictResp.body().length > 0) {
                 byte[] dictBytes = dictResp.body();
                 dictCache.put(dictId, new ZstdDictDecompress(dictBytes));
-                if (host != null) {
-                    hostToDictId.put(host, dictId);
-                }
                 log.info("Fetched and cached dictionary id={}, size={} bytes", dictId, dictBytes.length);
             } else {
-                log.warn("Dictionary fetch failed with status: {}", dictResp.statusCode());
+                log.warn("Dictionary fetch for {} failed with status: {}", dictId, dictResp.statusCode());
             }
         } catch (Exception e) {
-            // Fall back to plain requests with no error to the caller
             log.warn("Failed to fetch dictionary id={}: {}", dictId, e.getMessage());
         }
     }
@@ -132,12 +139,18 @@ public class ZdictClient implements AutoCloseable {
         return dictCache.containsKey(dictId);
     }
 
+    public int getDictionaryCount() {
+        return dictCache.size();
+    }
+
     @Override
     public void close() {
         for (ZstdDictDecompress ddict : dictCache.values()) {
-            ddict.close();
+            try {
+                ddict.close();
+            } catch (Exception ignored) {
+            }
         }
         dictCache.clear();
-        hostToDictId.clear();
     }
 }

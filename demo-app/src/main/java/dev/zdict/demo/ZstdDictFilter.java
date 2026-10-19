@@ -2,8 +2,8 @@ package dev.zdict.demo;
 
 import com.github.luben.zstd.Zstd;
 import com.github.luben.zstd.ZstdDictCompress;
+import jakarta.annotation.Nullable;
 import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -12,7 +12,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.servlet.HandlerMapping;
@@ -24,14 +23,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
-import java.util.Map;
+import java.util.*;
 
 /**
- * Servlet filter that compresses JSON responses using zstd with a shared dictionary.
- *
- * <p>Includes a safety layer (auth/cookie skip, BREACH protection), circuit breaker,
- * kill switch, and Micrometer metrics.
+ * Filter that compresses eligible responses with active zstd dictionaries per endpoint group,
+ * advertises available dictionaries via X-Dict-Available, and samples responses for learning.
  */
 @Component
 @EnableConfigurationProperties(ZdictProperties.class)
@@ -47,32 +43,39 @@ public class ZstdDictFilter extends OncePerRequestFilter {
     private final ZdictCircuitBreaker circuitBreaker;
     private final ZdictMetrics metrics;
     private final SampleStore sampleStore;
+    private final DictionaryRegistry registry;
 
     private volatile boolean runtimeEnabled = true;
-
-    private byte[] dictBytes;
-    private String dictId;
-    private ZstdDictCompress cdict;
+    private ZstdDictCompress testingCdict;
 
     public ZstdDictFilter(ZdictProperties props) {
-        this(props, new ZdictCircuitBreaker(), null, null);
+        this(props, new ZdictCircuitBreaker(), null, null, null);
     }
 
     public ZstdDictFilter(ZdictProperties props,
                           ZdictCircuitBreaker circuitBreaker,
                           @Nullable ZdictMetrics metrics) {
-        this(props, circuitBreaker, metrics, null);
+        this(props, circuitBreaker, metrics, null, null);
+    }
+
+    public ZstdDictFilter(ZdictProperties props,
+                          ZdictCircuitBreaker circuitBreaker,
+                          @Nullable ZdictMetrics metrics,
+                          @Nullable SampleStore sampleStore) {
+        this(props, circuitBreaker, metrics, sampleStore, null);
     }
 
     @Autowired
     public ZstdDictFilter(ZdictProperties props,
                           ZdictCircuitBreaker circuitBreaker,
                           @Nullable ZdictMetrics metrics,
-                          @Nullable SampleStore sampleStore) {
+                          @Nullable SampleStore sampleStore,
+                          @Nullable DictionaryRegistry registry) {
         this.props = props;
         this.circuitBreaker = circuitBreaker != null ? circuitBreaker : new ZdictCircuitBreaker();
         this.metrics = metrics;
         this.sampleStore = sampleStore;
+        this.registry = registry;
     }
 
     public boolean isEnabled() {
@@ -91,44 +94,47 @@ public class ZstdDictFilter extends OncePerRequestFilter {
         return metrics;
     }
 
+    public DictionaryRegistry getRegistry() {
+        return registry;
+    }
+
     @PostConstruct
     void init() {
         if (!props.isEnabled()) {
             log.info("zdict filter is disabled");
             return;
         }
-        String pathStr = props.getDictionaryPath();
-        if (pathStr == null || pathStr.isBlank()) {
-            log.warn("zdict.enabled=true but no dictionary-path configured; filter disabled");
-            props.setEnabled(false);
-            return;
-        }
-        Path dictPath = Path.of(pathStr);
-        if (!Files.isRegularFile(dictPath)) {
-            Path fallback = Path.of("demo-app", pathStr);
-            if (Files.isRegularFile(fallback)) {
-                dictPath = fallback;
-            } else {
-                log.warn("Dictionary file not found: {}; zdict filter disabled", dictPath);
-                props.setEnabled(false);
-                return;
+        String pathStr = props.getSeedDictionaryPath();
+        if (pathStr != null && !pathStr.isBlank()) {
+            Path dictPath = Path.of(pathStr);
+            if (!Files.isRegularFile(dictPath)) {
+                Path fallback = Path.of("demo-app", pathStr);
+                if (Files.isRegularFile(fallback)) {
+                    dictPath = fallback;
+                }
             }
-        }
-        try {
-            dictBytes = Files.readAllBytes(dictPath);
-            dictId = computeDictId(dictBytes);
-            cdict = new ZstdDictCompress(dictBytes, LEVEL);
-            log.info("zdict filter enabled, dictionary id={}, size={} bytes", dictId, dictBytes.length);
-        } catch (Exception e) {
-            log.warn("Failed to load dictionary: {}; zdict filter disabled", e.getMessage());
-            props.setEnabled(false);
-        }
-    }
-
-    @PreDestroy
-    void cleanup() {
-        if (cdict != null) {
-            cdict.close();
+            if (Files.isRegularFile(dictPath)) {
+                try {
+                    byte[] bytes = Files.readAllBytes(dictPath);
+                    String id = computeDictId(bytes);
+                    if (registry != null) {
+                        DictionaryVersion active = registry.getActive("/api/products");
+                        if (active == null || !active.getId().equals(id)) {
+                            registry.register("/api/products", bytes, 1000, 0.40);
+                            log.info("Seeded initial dictionary for /api/products from {}", dictPath);
+                        }
+                        DictionaryVersion activeId = registry.getActive("/api/products/{id}");
+                        if (activeId == null || !activeId.getId().equals(id)) {
+                            registry.register("/api/products/{id}", bytes, 1000, 0.40);
+                            log.info("Seeded initial dictionary for /api/products/{id} from {}", dictPath);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to seed dictionary from {}: {}", dictPath, e.getMessage());
+                }
+            } else {
+                log.warn("Dictionary file not found: {}", dictPath);
+            }
         }
     }
 
@@ -216,14 +222,14 @@ public class ZstdDictFilter extends OncePerRequestFilter {
                 return;
             }
 
-            // Response is eligible for compression and sampling!
-            if (dictId != null) {
-                response.setHeader("X-Dict-Id", dictId);
-            }
+            // Active dictionary lookup for this group
+            DictionaryVersion activeDict = (registry != null) ? registry.getActive(groupKey) : null;
+            ZstdDictCompress cdict = (testingCdict != null) ? testingCdict : ((activeDict != null) ? activeDict.getCdict() : null);
+            String dictId = (activeDict != null) ? activeDict.getId() : (testingCdict != null ? "testdict" : null);
 
             boolean canCompress = isEnabled() && cdict != null && !circuitBreaker.isOpen();
-            String clientDictId = request.getHeader("X-Dict-Id");
-            boolean clientMatches = clientDictId != null && clientDictId.equals(dictId);
+            Set<String> clientDictIds = getClientDictIds(request);
+            boolean clientMatches = dictId != null && clientDictIds.contains(dictId);
 
             if (canCompress && clientMatches) {
                 long start = System.nanoTime();
@@ -242,7 +248,7 @@ public class ZstdDictFilter extends OncePerRequestFilter {
                     response.setContentLength(compressed.length);
                     response.setHeader("Content-Encoding", "zstd-dict");
                     response.setHeader("X-Dict-Id", dictId);
-                    response.setHeader("Vary", "X-Dict-Id, Accept-Encoding");
+                    response.setHeader("Vary", "X-Dict-Ids, Accept-Encoding");
                     response.getOutputStream().write(compressed);
                     response.getOutputStream().flush();
                 } catch (Exception e) {
@@ -259,10 +265,16 @@ public class ZstdDictFilter extends OncePerRequestFilter {
                     recordSkipped("disabled");
                 } else if (circuitBreaker.isOpen()) {
                     recordSkipped("circuit_open");
-                } else if (clientDictId == null) {
+                } else if (clientDictIds.isEmpty()) {
                     recordSkipped("no_dict_id");
                 } else {
                     recordSkipped("wrong_dict_id");
+                }
+
+                // If active dictionary exists but client didn't supply it, send hint header
+                if (dictId != null) {
+                    response.setHeader("X-Dict-Available", dictId);
+                    response.setHeader("X-Dict-Id", dictId); // for backward compatibility
                 }
                 wrappedResponse.copyBodyToResponse();
             }
@@ -284,6 +296,25 @@ public class ZstdDictFilter extends OncePerRequestFilter {
                 log.error("Failed to copy body to response", inner);
             }
         }
+    }
+
+    private Set<String> getClientDictIds(HttpServletRequest request) {
+        Set<String> ids = new HashSet<>();
+        String idsHeader = request.getHeader("X-Dict-Ids");
+        if (idsHeader != null && !idsHeader.isBlank()) {
+            for (String part : idsHeader.split(",")) {
+                String trimmed = part.trim();
+                if (!trimmed.isEmpty()) ids.add(trimmed);
+            }
+        }
+        String singleId = request.getHeader("X-Dict-Id");
+        if (singleId != null && !singleId.isBlank()) {
+            for (String part : singleId.split(",")) {
+                String trimmed = part.trim();
+                if (!trimmed.isEmpty()) ids.add(trimmed);
+            }
+        }
+        return ids;
     }
 
     private void recordSkipped(String reason) {
@@ -321,9 +352,6 @@ public class ZstdDictFilter extends OncePerRequestFilter {
         return false;
     }
 
-    /**
-     * Dictionary id = first 8 hex chars of the SHA-256 of the dictionary bytes.
-     */
     public static String computeDictId(byte[] dict) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -335,11 +363,19 @@ public class ZstdDictFilter extends OncePerRequestFilter {
     }
 
     public String getDictId() {
-        return dictId;
+        if (registry != null) {
+            DictionaryVersion v = registry.getActive("/api/products");
+            if (v != null) return v.getId();
+        }
+        return null;
     }
 
     public byte[] getDictBytes() {
-        return dictBytes;
+        if (registry != null) {
+            DictionaryVersion v = registry.getActive("/api/products");
+            if (v != null) return v.getDictBytes();
+        }
+        return null;
     }
 
     public static String resolveGroupKey(HttpServletRequest request) {
@@ -362,6 +398,6 @@ public class ZstdDictFilter extends OncePerRequestFilter {
     }
 
     void setCdictForTesting(ZstdDictCompress cdict) {
-        this.cdict = cdict;
+        this.testingCdict = cdict;
     }
 }

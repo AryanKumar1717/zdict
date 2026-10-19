@@ -70,4 +70,32 @@ class ZdictClientIntegrationTest {
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(response.body()).isEqualTo("{\"status\":\"ok\"}");
     }
+
+    @Test
+    void clientSendsMultipleDictIdsAndReceivesHintWhenNotPresent() throws Exception {
+        String url = "http://localhost:" + port + "/api/products?page=1";
+        try (ZdictClient multiClient = new ZdictClient()) {
+            java.lang.reflect.Field field = ZdictClient.class.getDeclaredField("dictCache");
+            field.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, com.github.luben.zstd.ZstdDictDecompress> cache =
+                    (java.util.Map<String, com.github.luben.zstd.ZstdDictDecompress>) field.get(multiClient);
+            cache.put("dummy111", new com.github.luben.zstd.ZstdDictDecompress(new byte[]{0, 1, 2, 3}));
+            cache.put("dummy222", new com.github.luben.zstd.ZstdDictDecompress(new byte[]{4, 5, 6, 7}));
+
+            ZdictResponse resp1 = multiClient.get(url);
+            assertThat(resp1.statusCode()).isEqualTo(200);
+            assertThat(resp1.compressed()).isFalse();
+
+            String activeId = filter.getDictId();
+            assertThat(multiClient.hasDictionary(activeId)).isTrue();
+            assertThat(multiClient.getDictionaryCount()).isEqualTo(3);
+
+            ZdictResponse resp2 = multiClient.get(url);
+            assertThat(resp2.statusCode()).isEqualTo(200);
+            assertThat(resp2.compressed()).isTrue();
+            assertThat(resp2.httpResponse().headers().firstValue("Vary").orElse(""))
+                    .containsIgnoringCase("X-Dict-Ids");
+        }
+    }
 }

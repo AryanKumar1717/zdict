@@ -14,6 +14,7 @@ public class ZdictProperties {
 
     private boolean enabled = false;
     private String dictionaryPath = "";
+    private String seedDictionaryPath = "";
     private List<String> paths = List.of();
     private boolean allowAuthenticated = false;
     private boolean skipReflectedInput = true;
@@ -79,8 +80,19 @@ public class ZdictProperties {
         this.enabled = enabled;
     }
 
-    public String getDictionaryPath() {
+    public String getSeedDictionaryPath() {
+        if (seedDictionaryPath != null && !seedDictionaryPath.isBlank()) {
+            return seedDictionaryPath;
+        }
         return dictionaryPath;
+    }
+
+    public void setSeedDictionaryPath(String seedDictionaryPath) {
+        this.seedDictionaryPath = seedDictionaryPath;
+    }
+
+    public String getDictionaryPath() {
+        return getSeedDictionaryPath();
     }
 
     public void setDictionaryPath(String dictionaryPath) {
