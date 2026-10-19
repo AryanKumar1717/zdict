@@ -30,10 +30,20 @@ public class AutoTrainerService {
     private final DictionaryTrainerService trainerService;
     private final RatioTracker ratioTracker;
     private final Clock clock;
+    private final EventLog eventLog;
 
     private final ConcurrentHashMap<String, Object> groupLocks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Instant> lastTrainTimes = new ConcurrentHashMap<>();
     private final Set<String> driftClearedGroups = ConcurrentHashMap.newKeySet();
+
+    public AutoTrainerService(ZdictProperties props,
+                              SampleStore sampleStore,
+                              DictionaryRegistry registry,
+                              DictionaryTrainerService trainerService,
+                              RatioTracker ratioTracker,
+                              Clock clock) {
+        this(props, sampleStore, registry, trainerService, ratioTracker, clock, null);
+    }
 
     @Autowired
     public AutoTrainerService(ZdictProperties props,
@@ -41,13 +51,15 @@ public class AutoTrainerService {
                               DictionaryRegistry registry,
                               DictionaryTrainerService trainerService,
                               RatioTracker ratioTracker,
-                              @Autowired(required = false) Clock clock) {
+                              @Autowired(required = false) Clock clock,
+                              @Autowired(required = false) EventLog eventLog) {
         this.props = props;
         this.sampleStore = sampleStore;
         this.registry = registry;
         this.trainerService = trainerService;
         this.ratioTracker = ratioTracker;
         this.clock = clock != null ? clock : Clock.systemUTC();
+        this.eventLog = eventLog;
     }
 
     @Scheduled(fixedDelayString = "${zdict.auto-learning.interval:60000}")
@@ -125,6 +137,9 @@ public class AutoTrainerService {
                         sampleStore.clear(group);
                     }
                     driftClearedGroups.add(slug);
+                    if (eventLog != null) {
+                        eventLog.record("DRIFT_DETECTED", group, active.getId(), "Rolling ratio dropped below drift threshold");
+                    }
                     log.info("Drift detected for group '{}'; cleared sample reservoir once to collect fresh samples", group);
                 }
 
@@ -183,6 +198,11 @@ public class AutoTrainerService {
 
             if (canaryMean >= activeMean * 1.03 && canaryFailRate <= activeFailRate) {
                 registry.promoteCanary(group);
+                String reason = String.format("Canary mean (%.4f) >= active (%.4f) * 1.03 and failure rate (%.4f) <= active (%.4f)",
+                        canaryMean, activeMean, canaryFailRate, activeFailRate);
+                if (eventLog != null) {
+                    eventLog.record("PROMOTED", group, canary.getId(), reason);
+                }
                 log.info("Canary {} PROMOTED to ACTIVE for group '{}': canaryMean={:.4f}, activeMean={:.4f}, canaryFailRate={:.4f}, activeFailRate={:.4f}",
                         canary.getId(), group, canaryMean, activeMean, canaryFailRate, activeFailRate);
             } else {
@@ -193,10 +213,17 @@ public class AutoTrainerService {
                     reason = String.format("canary failure rate (%.4f) exceeded active (%.4f)", canaryFailRate, activeFailRate);
                 }
                 registry.rollbackCanary(group, reason);
+                if (eventLog != null) {
+                    eventLog.record("ROLLED_BACK", group, canary.getId(), reason);
+                }
                 log.info("Canary {} ROLLED_BACK for group '{}': {}", canary.getId(), group, reason);
             }
         } else if (elapsed.compareTo(maxDuration) >= 0) {
-            registry.rollbackCanary(group, "insufficient traffic");
+            String reason = "insufficient traffic";
+            registry.rollbackCanary(group, reason);
+            if (eventLog != null) {
+                eventLog.record("ROLLED_BACK", group, canary.getId(), reason);
+            }
             log.info("Canary {} ROLLED_BACK for group '{}' due to timeout: insufficient traffic ({}/{} responses after {})",
                     canary.getId(), group, canaryResponses, minResponses, elapsed);
         }

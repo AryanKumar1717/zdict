@@ -23,11 +23,19 @@ public class DictionaryTrainerService {
     private final SampleStore sampleStore;
     private final DictionaryRegistry registry;
     private final ZdictProperties props;
+    private final EventLog eventLog;
 
     public DictionaryTrainerService(SampleStore sampleStore, DictionaryRegistry registry, ZdictProperties props) {
+        this(sampleStore, registry, props, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DictionaryTrainerService(SampleStore sampleStore, DictionaryRegistry registry, ZdictProperties props,
+                                  @org.springframework.beans.factory.annotation.Autowired(required = false) EventLog eventLog) {
         this.sampleStore = sampleStore;
         this.registry = registry;
         this.props = props;
+        this.eventLog = eventLog;
     }
 
     public TrainResult train(String group) throws IOException {
@@ -113,6 +121,9 @@ public class DictionaryTrainerService {
             result.setPromoted(true);
             result.setDecision("PROMOTED_FIRST_ACTIVE");
             result.setReason("No active dictionary existed for group; promoted as initial ACTIVE version");
+            if (eventLog != null) {
+                eventLog.record("TRAINED", group, candidateId, result.getReason());
+            }
             log.info("Promoted initial dictionary {} for group '{}' (holdout ratio: {:.4f}, plain: {:.4f})",
                     candidateId, group, candidateRatio, plainRatio);
         } else {
@@ -124,6 +135,9 @@ public class DictionaryTrainerService {
                 result.setDecision("CANARY_STARTED");
                 result.setReason(String.format("Candidate beat active dictionary (%s) by %.2f%% (>= 5%% required); registered as CANARY",
                         activeVersion.getId(), improvement * 100));
+                if (eventLog != null) {
+                    eventLog.record("CANARY_STARTED", group, candidateId, result.getReason());
+                }
                 log.info("Registered dictionary {} as CANARY for group '{}' beating active {} by {:.2f}% (active: {:.4f}, new: {:.4f})",
                         candidateId, group, activeVersion.getId(), improvement * 100, activeRatio, candidateRatio);
             } else {

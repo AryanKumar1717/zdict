@@ -19,23 +19,32 @@ public class RatioTracker {
     private final DictionaryRegistry registry;
     private final ZdictProperties props;
     private final Clock clock;
+    private final ZdictMetrics metrics;
 
     // group slug -> GroupRatioStats
     private final ConcurrentHashMap<String, GroupRatioStats> groupStats = new ConcurrentHashMap<>();
 
     @Autowired
-    public RatioTracker(DictionaryRegistry registry, ZdictProperties props, @Autowired(required = false) Clock clock) {
+    public RatioTracker(DictionaryRegistry registry,
+                        ZdictProperties props,
+                        @Autowired(required = false) Clock clock,
+                        @Autowired(required = false) ZdictMetrics metrics) {
         this.registry = registry;
         this.props = props;
         this.clock = clock != null ? clock : Clock.systemUTC();
+        this.metrics = metrics;
+    }
+
+    public RatioTracker(DictionaryRegistry registry, ZdictProperties props, Clock clock) {
+        this(registry, props, clock, null);
     }
 
     public RatioTracker(DictionaryRegistry registry, ZdictProperties props) {
-        this(registry, props, Clock.systemUTC());
+        this(registry, props, Clock.systemUTC(), null);
     }
 
     public RatioTracker(ZdictProperties props) {
-        this(null, props, Clock.systemUTC());
+        this(null, props, Clock.systemUTC(), null);
     }
 
     private GroupRatioStats getGroupStats(String group) {
@@ -56,8 +65,13 @@ public class RatioTracker {
             return;
         }
         GroupRatioStats gs = getGroupStats(group);
+        double mean;
         synchronized (gs) {
             gs.recordSuccess(dictId, ratio);
+            mean = gs.getRollingMean(dictId);
+        }
+        if (metrics != null) {
+            metrics.updateRollingRatio(group, mean);
         }
     }
 
