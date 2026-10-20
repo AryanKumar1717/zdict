@@ -1,111 +1,125 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="500" viewBox="0 0 960 500">
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="520" viewBox="0 0 980 520">
   <rect width="100%" height="100%" fill="#ffffff" rx="8"/>
   <rect width="100%" height="100%" fill="none" stroke="#e2e8f0" stroke-width="1" rx="8"/>
-  <text x="30" y="32" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="bold" fill="#1a202c">[SYNTHETIC] API Schema Drift: 5-Strategy Comparison</text>
+  <text x="30" y="32" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="bold" fill="#1a202c">[SYNTHETIC] API Schema Drift: 6-Strategy Comparison</text>
   <text x="30" y="54" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#718096">Total-bytes based ratios | Switch: #600 | Drift detected: #608 (8 elapsed) | Threshold: &lt; 0.85 * baseline</text>
-  <line x1="30" y1="84" x2="46" y2="84" stroke="#718096" stroke-width="2.5"/>
-  <circle cx="38" cy="84" r="3.5" fill="#718096"/>
-  <text x="52" y="88" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">gzip (lvl 6)</text>
-  <line x1="145" y1="84" x2="161" y2="84" stroke="#e53e3e" stroke-width="2.5"/>
-  <circle cx="153" cy="84" r="3.5" fill="#e53e3e"/>
-  <text x="167" y="88" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">static zstd+dict</text>
-  <line x1="285" y1="84" x2="301" y2="84" stroke="#3182ce" stroke-width="2.5"/>
-  <circle cx="293" cy="84" r="3.5" fill="#3182ce"/>
-  <text x="307" y="88" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">fixed-sched (200)</text>
-  <line x1="445" y1="84" x2="461" y2="84" stroke="#38a169" stroke-width="2.5"/>
-  <circle cx="453" cy="84" r="3.5" fill="#38a169"/>
-  <text x="467" y="88" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">adaptive (buf=200)</text>
-  <line x1="615" y1="84" x2="631" y2="84" stroke="#805ad5" stroke-width="2.5"/>
-  <circle cx="623" cy="84" r="3.5" fill="#805ad5"/>
-  <text x="637" y="88" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">adaptive (buf=100)</text>
-  <line x1="70" y1="420" x2="920" y2="420" stroke="#edf2f7" stroke-width="1"/>
-  <text x="60" y="424" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">0.0x</text>
-  <line x1="70" y1="357" x2="920" y2="357" stroke="#edf2f7" stroke-width="1"/>
-  <text x="60" y="361" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">2.2x</text>
-  <line x1="70" y1="294" x2="920" y2="294" stroke="#edf2f7" stroke-width="1"/>
-  <text x="60" y="298" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">4.4x</text>
-  <line x1="70" y1="231" x2="920" y2="231" stroke="#edf2f7" stroke-width="1"/>
-  <text x="60" y="235" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">6.6x</text>
-  <line x1="70" y1="168" x2="920" y2="168" stroke="#edf2f7" stroke-width="1"/>
-  <text x="60" y="172" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">8.8x</text>
-  <line x1="70" y1="105" x2="920" y2="105" stroke="#edf2f7" stroke-width="1"/>
-  <text x="60" y="109" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">11.0x</text>
-  <line x1="580" y1="105" x2="580" y2="420" stroke="#e53e3e" stroke-width="2" stroke-dasharray="4,4"/>
-  <text x="580" y="99" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#e53e3e" text-anchor="middle">Shape Switch (#600)</text>
-  <line x1="70" y1="420" x2="70" y2="425" stroke="#cbd5e0" stroke-width="1"/>
-  <text x="70" y="440" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">100</text>
-  <line x1="164" y1="420" x2="164" y2="425" stroke="#cbd5e0" stroke-width="1"/>
-  <text x="164" y="440" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">200</text>
-  <line x1="258" y1="420" x2="258" y2="425" stroke="#cbd5e0" stroke-width="1"/>
-  <text x="258" y="440" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">300</text>
-  <line x1="353" y1="420" x2="353" y2="425" stroke="#cbd5e0" stroke-width="1"/>
-  <text x="353" y="440" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">400</text>
-  <line x1="447" y1="420" x2="447" y2="425" stroke="#cbd5e0" stroke-width="1"/>
-  <text x="447" y="440" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">500</text>
-  <line x1="542" y1="420" x2="542" y2="425" stroke="#cbd5e0" stroke-width="1"/>
-  <text x="542" y="440" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">600</text>
-  <line x1="636" y1="420" x2="636" y2="425" stroke="#cbd5e0" stroke-width="1"/>
-  <text x="636" y="440" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">700</text>
-  <line x1="731" y1="420" x2="731" y2="425" stroke="#cbd5e0" stroke-width="1"/>
-  <text x="731" y="440" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">800</text>
-  <line x1="825" y1="420" x2="825" y2="425" stroke="#cbd5e0" stroke-width="1"/>
-  <text x="825" y="440" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">900</text>
-  <line x1="920" y1="420" x2="920" y2="425" stroke="#cbd5e0" stroke-width="1"/>
-  <text x="920" y="440" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">1000</text>
-  <polyline fill="none" stroke="#718096" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" points="70,386 164,386 258,386 353,386 447,386 542,386 636,384 731,384 825,384 920,384"/>
-  <polyline fill="none" stroke="#e53e3e" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" points="70,161 164,209 258,217 353,207 447,217 542,217 636,383 731,384 825,384 920,384"/>
-  <polyline fill="none" stroke="#3182ce" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" points="70,161 164,209 258,217 353,207 447,212 542,203 636,384 731,384 825,178 920,171"/>
-  <polyline fill="none" stroke="#38a169" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" points="70,161 164,209 258,217 353,207 447,217 542,217 636,383 731,384 825,253 920,171"/>
-  <polyline fill="none" stroke="#805ad5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points="70,161 164,209 258,217 353,207 447,217 542,217 636,383 731,289 825,255 920,255"/>
-  <circle cx="70" cy="386" r="3" fill="#718096"/>
-  <circle cx="164" cy="386" r="3" fill="#718096"/>
-  <circle cx="258" cy="386" r="3" fill="#718096"/>
-  <circle cx="353" cy="386" r="3" fill="#718096"/>
-  <circle cx="447" cy="386" r="3" fill="#718096"/>
-  <circle cx="542" cy="386" r="3" fill="#718096"/>
-  <circle cx="636" cy="384" r="3" fill="#718096"/>
-  <circle cx="731" cy="384" r="3" fill="#718096"/>
-  <circle cx="825" cy="384" r="3" fill="#718096"/>
-  <circle cx="920" cy="384" r="3" fill="#718096"/>
-  <rect x="68" y="159" width="5" height="5" fill="#e53e3e"/>
-  <rect x="162" y="207" width="5" height="5" fill="#e53e3e"/>
-  <rect x="256" y="215" width="5" height="5" fill="#e53e3e"/>
-  <rect x="351" y="205" width="5" height="5" fill="#e53e3e"/>
-  <rect x="445" y="215" width="5" height="5" fill="#e53e3e"/>
-  <rect x="540" y="215" width="5" height="5" fill="#e53e3e"/>
-  <rect x="634" y="381" width="5" height="5" fill="#e53e3e"/>
-  <rect x="729" y="382" width="5" height="5" fill="#e53e3e"/>
-  <rect x="823" y="382" width="5" height="5" fill="#e53e3e"/>
-  <rect x="918" y="382" width="5" height="5" fill="#e53e3e"/>
-  <circle cx="70" cy="161" r="3.5" fill="#3182ce"/>
-  <circle cx="164" cy="209" r="3.5" fill="#3182ce"/>
-  <circle cx="258" cy="217" r="3.5" fill="#3182ce"/>
-  <circle cx="353" cy="207" r="3.5" fill="#3182ce"/>
-  <circle cx="447" cy="212" r="3.5" fill="#3182ce"/>
-  <circle cx="542" cy="203" r="3.5" fill="#3182ce"/>
-  <circle cx="636" cy="384" r="3.5" fill="#3182ce"/>
-  <circle cx="731" cy="384" r="3.5" fill="#3182ce"/>
-  <circle cx="825" cy="178" r="3.5" fill="#3182ce"/>
-  <circle cx="920" cy="171" r="3.5" fill="#3182ce"/>
-  <circle cx="70" cy="161" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="164" cy="209" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="258" cy="217" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="353" cy="207" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="447" cy="217" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="542" cy="217" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="636" cy="383" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="731" cy="384" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="825" cy="253" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="920" cy="171" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <rect x="67" y="158" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="161" y="206" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="255" y="214" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="350" y="204" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="444" y="214" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="539" y="214" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="633" y="380" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="728" y="286" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="822" y="252" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="917" y="252" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <text x="495" y="460" font-family="system-ui, sans-serif" font-size="12" fill="#718096" text-anchor="middle">Payload Sequence (100 per window)</text>
+  <line x1="30" y1="86" x2="46" y2="86" stroke="#718096" stroke-width="2.5"/>
+  <circle cx="38" cy="86" r="3.5" fill="#718096"/>
+  <text x="52" y="90" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">gzip (lvl 6)</text>
+  <line x1="140" y1="86" x2="156" y2="86" stroke="#e53e3e" stroke-width="2.5"/>
+  <circle cx="148" cy="86" r="3.5" fill="#e53e3e"/>
+  <text x="162" y="90" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">static zstd</text>
+  <line x1="260" y1="86" x2="276" y2="86" stroke="#3182ce" stroke-width="2.5"/>
+  <circle cx="268" cy="86" r="3.5" fill="#3182ce"/>
+  <text x="282" y="90" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">fixed (200/200)</text>
+  <line x1="410" y1="86" x2="426" y2="86" stroke="#00a3c4" stroke-width="2.5"/>
+  <circle cx="418" cy="86" r="3.5" fill="#00a3c4"/>
+  <text x="432" y="90" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">fixed (100/100)</text>
+  <line x1="560" y1="86" x2="576" y2="86" stroke="#38a169" stroke-width="2.5"/>
+  <circle cx="568" cy="86" r="3.5" fill="#38a169"/>
+  <text x="582" y="90" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">adaptive (buf=200)</text>
+  <line x1="730" y1="86" x2="746" y2="86" stroke="#805ad5" stroke-width="2.5"/>
+  <circle cx="738" cy="86" r="3.5" fill="#805ad5"/>
+  <text x="752" y="90" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">adaptive (buf=100)</text>
+  <line x1="70" y1="435" x2="940" y2="435" stroke="#edf2f7" stroke-width="1"/>
+  <text x="60" y="439" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">0.0x</text>
+  <line x1="70" y1="371" x2="940" y2="371" stroke="#edf2f7" stroke-width="1"/>
+  <text x="60" y="375" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">2.2x</text>
+  <line x1="70" y1="307" x2="940" y2="307" stroke="#edf2f7" stroke-width="1"/>
+  <text x="60" y="311" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">4.4x</text>
+  <line x1="70" y1="243" x2="940" y2="243" stroke="#edf2f7" stroke-width="1"/>
+  <text x="60" y="247" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">6.6x</text>
+  <line x1="70" y1="179" x2="940" y2="179" stroke="#edf2f7" stroke-width="1"/>
+  <text x="60" y="183" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">8.8x</text>
+  <line x1="70" y1="115" x2="940" y2="115" stroke="#edf2f7" stroke-width="1"/>
+  <text x="60" y="119" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">11.0x</text>
+  <line x1="592" y1="115" x2="592" y2="435" stroke="#e53e3e" stroke-width="2" stroke-dasharray="4,4"/>
+  <text x="592" y="107" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#e53e3e" text-anchor="middle">Shape Switch (#600)</text>
+  <line x1="70" y1="435" x2="70" y2="440" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="70" y="455" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">100</text>
+  <line x1="166" y1="435" x2="166" y2="440" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="166" y="455" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">200</text>
+  <line x1="263" y1="435" x2="263" y2="440" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="263" y="455" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">300</text>
+  <line x1="360" y1="435" x2="360" y2="440" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="360" y="455" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">400</text>
+  <line x1="456" y1="435" x2="456" y2="440" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="456" y="455" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">500</text>
+  <line x1="553" y1="435" x2="553" y2="440" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="553" y="455" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">600</text>
+  <line x1="650" y1="435" x2="650" y2="440" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="650" y="455" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">700</text>
+  <line x1="746" y1="435" x2="746" y2="440" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="746" y="455" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">800</text>
+  <line x1="843" y1="435" x2="843" y2="440" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="843" y="455" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">900</text>
+  <line x1="940" y1="435" x2="940" y2="440" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="940" y="455" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">1000</text>
+  <polyline fill="none" stroke="#718096" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" points="70,400 166,400 263,400 360,400 456,400 553,400 650,398 746,398 843,398 940,398"/>
+  <polyline fill="none" stroke="#e53e3e" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" points="70,172 166,221 263,229 360,219 456,229 553,229 650,398 746,399 843,399 940,399"/>
+  <polyline fill="none" stroke="#3182ce" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" points="70,172 166,221 263,229 360,219 456,224 553,215 650,399 746,399 843,190 940,183"/>
+  <polyline fill="none" stroke="#00a3c4" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" points="70,263 166,274 263,281 360,281 456,282 553,280 650,398 746,264 843,264 940,271"/>
+  <polyline fill="none" stroke="#38a169" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" points="70,172 166,221 263,229 360,219 456,229 553,229 650,398 746,399 843,265 940,182"/>
+  <polyline fill="none" stroke="#805ad5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points="70,172 166,221 263,229 360,219 456,229 553,229 650,398 746,302 843,267 940,267"/>
+  <circle cx="70" cy="400" r="3" fill="#718096"/>
+  <circle cx="166" cy="400" r="3" fill="#718096"/>
+  <circle cx="263" cy="400" r="3" fill="#718096"/>
+  <circle cx="360" cy="400" r="3" fill="#718096"/>
+  <circle cx="456" cy="400" r="3" fill="#718096"/>
+  <circle cx="553" cy="400" r="3" fill="#718096"/>
+  <circle cx="650" cy="398" r="3" fill="#718096"/>
+  <circle cx="746" cy="398" r="3" fill="#718096"/>
+  <circle cx="843" cy="398" r="3" fill="#718096"/>
+  <circle cx="940" cy="398" r="3" fill="#718096"/>
+  <rect x="68" y="170" width="5" height="5" fill="#e53e3e"/>
+  <rect x="164" y="219" width="5" height="5" fill="#e53e3e"/>
+  <rect x="261" y="227" width="5" height="5" fill="#e53e3e"/>
+  <rect x="358" y="217" width="5" height="5" fill="#e53e3e"/>
+  <rect x="454" y="227" width="5" height="5" fill="#e53e3e"/>
+  <rect x="551" y="227" width="5" height="5" fill="#e53e3e"/>
+  <rect x="648" y="396" width="5" height="5" fill="#e53e3e"/>
+  <rect x="744" y="397" width="5" height="5" fill="#e53e3e"/>
+  <rect x="841" y="397" width="5" height="5" fill="#e53e3e"/>
+  <rect x="938" y="397" width="5" height="5" fill="#e53e3e"/>
+  <circle cx="70" cy="172" r="3.5" fill="#3182ce"/>
+  <circle cx="166" cy="221" r="3.5" fill="#3182ce"/>
+  <circle cx="263" cy="229" r="3.5" fill="#3182ce"/>
+  <circle cx="360" cy="219" r="3.5" fill="#3182ce"/>
+  <circle cx="456" cy="224" r="3.5" fill="#3182ce"/>
+  <circle cx="553" cy="215" r="3.5" fill="#3182ce"/>
+  <circle cx="650" cy="399" r="3.5" fill="#3182ce"/>
+  <circle cx="746" cy="399" r="3.5" fill="#3182ce"/>
+  <circle cx="843" cy="190" r="3.5" fill="#3182ce"/>
+  <circle cx="940" cy="183" r="3.5" fill="#3182ce"/>
+  <polygon points="70,259 67,266 73,266" fill="#00a3c4"/>
+  <polygon points="166,270 163,277 169,277" fill="#00a3c4"/>
+  <polygon points="263,277 260,284 266,284" fill="#00a3c4"/>
+  <polygon points="360,277 357,284 363,284" fill="#00a3c4"/>
+  <polygon points="456,278 453,285 459,285" fill="#00a3c4"/>
+  <polygon points="553,276 550,283 556,283" fill="#00a3c4"/>
+  <polygon points="650,394 647,401 653,401" fill="#00a3c4"/>
+  <polygon points="746,260 743,267 749,267" fill="#00a3c4"/>
+  <polygon points="843,260 840,267 846,267" fill="#00a3c4"/>
+  <polygon points="940,267 937,274 943,274" fill="#00a3c4"/>
+  <circle cx="70" cy="172" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="166" cy="221" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="263" cy="229" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="360" cy="219" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="456" cy="229" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="553" cy="229" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="650" cy="398" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="746" cy="399" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="843" cy="265" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="940" cy="182" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <rect x="67" y="169" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="163" y="218" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="260" y="226" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="357" y="216" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="453" y="226" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="550" y="226" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="647" y="395" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="743" y="299" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="840" y="264" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="937" y="264" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <text x="505" y="477" font-family="system-ui, sans-serif" font-size="12" fill="#718096" text-anchor="middle">Payload Sequence (100 per window)</text>
 </svg>

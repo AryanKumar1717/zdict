@@ -150,7 +150,7 @@ The `zdict.responses` counter includes the reason tag for visibility into gating
 
 ---
 
-### 4. Schema Drift Benchmark: 5-Strategy Comparison
+### 4. Schema Drift Benchmark: 6-Strategy Comparison
 
 ![Schema Drift](benchmark-results/drift.svg)
 
@@ -169,34 +169,80 @@ Simulates continuous traffic across 1,000 payloads: first 60% with Schema A (leg
 | Strategy | Total Compressed Size | Mean Ratio | Retrain Count | Post-Switch 100 Ratio | Training Time (ms) | Recovery Horizon |
 |---|---|---|---|---|---|---|
 | **gzip (level 6)** | 254,783 B | **1.24x** | 0 | 1.28x | 0 ms | - |
-| **Static zstd+dict** | 135,008 B | **2.34x** | 0 | 1.30x | 78 ms | - |
-| **Fixed-schedule zstd+dict** | 87,705 B | **3.61x** | 4 | 1.27x | 159 ms | 0 payloads |
-| **Adaptive zdict (buffer=200)** | **88,888 B** | **3.56x** | **1** | **1.30x** | 98 ms | 208 payloads |
-| **Adaptive zdict (buffer=100)** | **70,681 B** | **4.48x** | **1** | **1.30x** | 97 ms | 108 payloads |
+| **Static zstd+dict** | 135,008 B | **2.34x** | 0 | 1.30x | 99 ms | - |
+| **Fixed-schedule (200/200)** | 87,705 B | **3.61x** | 4 | 1.27x | 228 ms | 0 payloads |
+| **Fixed-schedule (100/100)** | 77,556 B | **4.08x** | 9 | 1.31x | 307 ms | 0 payloads |
+| **Adaptive zdict (buffer=200)** | **88,888 B** | **3.56x** | **1** | **1.30x** | 144 ms | 208 payloads |
+| **Adaptive zdict (buffer=100)** | **70,681 B** | **4.48x** | **1** | **1.30x** | 131 ms | 108 payloads |
 
-#### Sensitivity Matrix Across Switch Points & Seeds
+#### Sensitivity Matrix: One Row Per (Strategy, Switch Point) Across 5 Seeds
 
-Evaluated across 4 switch points (`550, 650, 730, 800`) and 5 random seeds (`42, 101, 2024, 777, 9999`) &mdash; 20 simulation runs per strategy:
+Evaluated across 4 switch points (`550, 650, 730, 800`) and 5 random seeds (`42, 101, 2024, 777, 9999`). Means and min/max computed across seeds for each switch point:
 
-| Strategy | Total Compressed Bytes (mean [min - max]) | Retrain Count (mean [min - max]) | Post-Switch 100 Ratio (mean [min - max]) | Training Time ms (mean [min - max]) |
-|---|---|---|---|---|
-| **gzip (level 6)** | 251,573 B [246,800 - 256,953] | 0.0 [0 - 0] | 1.28x [1.28x - 1.28x] | 0.0 ms [0 - 0] |
-| **Static zstd+dict** | 116,050 B [87,546 - 148,122] | 0.0 [0 - 0] | 1.27x [1.26x - 1.27x] | 18.6 ms [16 - 25] |
-| **Fixed-schedule zstd+dict** | 80,320 B [58,217 - 99,788] | 4.0 [4 - 4] | 1.36x [1.26x - 1.66x] | 88.2 ms [82 - 97] |
-| **Adaptive zdict (buffer=200)** | 89,948 B [87,546 - 91,417] | 0.8 [0 - 1] | 1.27x [1.26x - 1.27x] | 31.8 ms [17 - 42] |
-| **Adaptive zdict (buffer=100)** | 70,800 B [68,746 - 73,331] | 1.0 [1 - 1] | 1.27x [1.26x - 1.27x] | 35.3 ms [31 - 46] |
+| Strategy | Switch Point | Total Compressed Bytes (mean [min - max]) | Retrain Count (mean [min - max]) | Post-Switch 100 Ratio (mean [min - max]) | Training Time ms (mean [min - max]) |
+|---|---|---|---|---|---|
+| **gzip (level 6)** | #550 | 256,953 B [256,953 - 256,953] | 0.0 [0 - 0] | 1.28x [1.28x - 1.28x] | 0.0 ms [0 - 0] |
+| **Static zstd+dict** | #550 | 148,122 B [148,122 - 148,122] | 0.0 [0 - 0] | 1.27x [1.27x - 1.27x] | 25.6 ms [24 - 27] |
+| **Fixed-schedule (200/200)** | #550 | 99,788 B [99,788 - 99,788] | 4.0 [4 - 4] | 1.26x [1.26x - 1.26x] | 141.6 ms [120 - 167] |
+| **Fixed-schedule (100/100)** | #550 | 68,953 B [68,953 - 68,953] | 9.0 [9 - 9] | 2.03x [2.03x - 2.03x] | 271.8 ms [226 - 334] |
+| **Adaptive zdict (buffer=200)** | #550 | 90,337 B [90,337 - 90,337] | 1.0 [1 - 1] | 1.27x [1.27x - 1.27x] | 54.8 ms [48 - 67] |
+| **Adaptive zdict (buffer=100)** | #550 | 73,331 B [73,331 - 73,331] | 1.0 [1 - 1] | 1.27x [1.27x - 1.27x] | 51.2 ms [47 - 61] |
+| **gzip (level 6)** | #650 | 252,899 B [252,899 - 252,899] | 0.0 [0 - 0] | 1.28x [1.28x - 1.28x] | 0.0 ms [0 - 0] |
+| **Static zstd+dict** | #650 | 123,967 B [123,967 - 123,967] | 0.0 [0 - 0] | 1.27x [1.27x - 1.27x] | 33.2 ms [22 - 41] |
+| **Fixed-schedule (200/200)** | #650 | 76,044 B [76,044 - 76,044] | 4.0 [4 - 4] | 1.26x [1.26x - 1.26x] | 163.8 ms [126 - 194] |
+| **Fixed-schedule (100/100)** | #650 | 68,142 B [68,142 - 68,142] | 9.0 [9 - 9] | 2.05x [2.05x - 2.05x] | 308.2 ms [245 - 369] |
+| **Adaptive zdict (buffer=200)** | #650 | 90,492 B [90,492 - 90,492] | 1.0 [1 - 1] | 1.27x [1.27x - 1.27x] | 67.8 ms [56 - 78] |
+| **Adaptive zdict (buffer=100)** | #650 | 70,821 B [70,821 - 70,821] | 1.0 [1 - 1] | 1.27x [1.27x - 1.27x] | 62.4 ms [47 - 77] |
+| **gzip (level 6)** | #730 | 249,641 B [249,641 - 249,641] | 0.0 [0 - 0] | 1.28x [1.28x - 1.28x] | 0.0 ms [0 - 0] |
+| **Static zstd+dict** | #730 | 104,564 B [104,564 - 104,564] | 0.0 [0 - 0] | 1.26x [1.26x - 1.26x] | 39.8 ms [38 - 41] |
+| **Fixed-schedule (200/200)** | #730 | 58,217 B [58,217 - 58,217] | 4.0 [4 - 4] | 1.66x [1.66x - 1.66x] | 165.4 ms [131 - 190] |
+| **Fixed-schedule (100/100)** | #730 | 71,710 B [71,710 - 71,710] | 9.0 [9 - 9] | 1.64x [1.64x - 1.64x] | 301.6 ms [231 - 353] |
+| **Adaptive zdict (buffer=200)** | #730 | 91,417 B [91,417 - 91,417] | 1.0 [1 - 1] | 1.26x [1.26x - 1.26x] | 75.8 ms [58 - 82] |
+| **Adaptive zdict (buffer=100)** | #730 | 70,302 B [70,302 - 70,302] | 1.0 [1 - 1] | 1.26x [1.26x - 1.26x] | 71.0 ms [55 - 77] |
+| **gzip (level 6)** | #800 | 246,800 B [246,800 - 246,800] | 0.0 [0 - 0] | 1.28x [1.28x - 1.28x] | 0.0 ms [0 - 0] |
+| **Static zstd+dict** | #800 | 87,546 B [87,546 - 87,546] | 0.0 [0 - 0] | 1.27x [1.27x - 1.27x] | 17.2 ms [16 - 19] |
+| **Fixed-schedule (200/200)** | #800 | 87,230 B [87,230 - 87,230] | 4.0 [4 - 4] | 1.26x [1.26x - 1.26x] | 85.8 ms [83 - 89] |
+| **Fixed-schedule (100/100)** | #800 | 76,822 B [76,822 - 76,822] | 9.0 [9 - 9] | 1.28x [1.28x - 1.28x] | 173.0 ms [157 - 223] |
+| **Adaptive zdict (buffer=200)** | #800 | 87,546 B [87,546 - 87,546] | 0.0 [0 - 0] *(5/5 seeds 0 retrains)* | 1.27x [1.27x - 1.27x] | 17.2 ms [16 - 19] |
+| **Adaptive zdict (buffer=100)** | #800 | 68,746 B [68,746 - 68,746] | 1.0 [1 - 1] | 1.27x [1.27x - 1.27x] | 33.8 ms [32 - 35] |
 
-*Note on Adaptive-200 retrain mean (0.8)*: At late switch point 800, only 200 total Shape B payloads exist. Because detection occurs at #808, 200 post-drift payloads cannot accumulate before the 1000-payload stream terminates. Adaptive-100 reliably retrains at #908 across all seeds.
+#### Missed-Drift & Horizon Truncation Analysis (Adaptive Runs with 0 Retrains)
 
-#### No-Drift Stream Verification (Shape A Only, 1,000 Payloads)
+When drift occurs late in a traffic stream (e.g., switch point #800), adaptive retraining buffers may not have enough remaining payloads to trigger before the stream ends:
+
+| Strategy | Switch Point | Seed | Drift Detected At | Payloads Left After Detection | Buffer Needed | Horizon Diagnosis |
+|---|---|---|---|---|---|---|
+| **Adaptive zdict (buffer=200)** | #800 | 42 | #815 (15 elapsed) | **185 payloads** | 200 payloads | Detected at #815, leaving 185 payloads (< 200 needed for buffer). Retrain could not complete before stream end. |
+| **Adaptive zdict (buffer=200)** | #800 | 101 | #815 (15 elapsed) | **185 payloads** | 200 payloads | Detected at #815, leaving 185 payloads (< 200 needed for buffer). Retrain could not complete before stream end. |
+| **Adaptive zdict (buffer=200)** | #800 | 2024 | #815 (15 elapsed) | **185 payloads** | 200 payloads | Detected at #815, leaving 185 payloads (< 200 needed for buffer). Retrain could not complete before stream end. |
+| **Adaptive zdict (buffer=200)** | #800 | 777 | #815 (15 elapsed) | **185 payloads** | 200 payloads | Detected at #815, leaving 185 payloads (< 200 needed for buffer). Retrain could not complete before stream end. |
+| **Adaptive zdict (buffer=200)** | #800 | 9999 | #815 (15 elapsed) | **185 payloads** | 200 payloads | Detected at #815, leaving 185 payloads (< 200 needed for buffer). Retrain could not complete before stream end. |
+
+*In contrast, **Adaptive zdict (buffer=100)** successfully retrained at #915 across all 5 seeds because 185 remaining payloads is more than sufficient for its 100-payload buffer requirement.*
+
+#### Stationary Traffic Stream Verification
+
+##### Clean No-Drift Stream (Shape A Only, 1,000 Payloads)
 
 | Strategy | Total Compressed Size | Mean Ratio | Retrain Count | Training Time (ms) | Efficiency Verdict |
 |---|---|---|---|---|---|
 | **gzip (level 6)** | 238,687 B | **1.21x** | **0** | 0 ms | - |
 | **Static zstd+dict** | 39,105 B | **7.40x** | **0** | 17 ms | Optimal for static traffic |
-| **Fixed-schedule zstd+dict** | 38,443 B | **7.53x** | **4** | 84 ms | **Wasteful** (4 blind retrains with zero drift) |
+| **Fixed-schedule (200/200)** | 38,443 B | **7.53x** | **4** | 82 ms | **Wasteful** (4 blind retrains with 0 drift) |
+| **Fixed-schedule (100/100)** | 53,589 B | **5.40x** | **9** | 159 ms | **Wasteful** (9 blind retrains with 0 drift) |
 | **Adaptive zdict (buffer=200)** | 39,105 B | **7.40x** | **0** | 17 ms | **Optimal** (zero false alarms) |
 | **Adaptive zdict (buffer=100)** | 39,105 B | **7.40x** | **0** | 17 ms | **Optimal** (zero false alarms) |
+
+##### Noisy-Stationary Stream (Shape A Varying Sizes + Outliers, 1,000 Payloads)
+
+| Strategy | Total Compressed Size | Mean Ratio | Retrain Count | False Alarm Count | Training Time (ms) | Resilience Verdict |
+|---|---|---|---|---|---|---|
+| **gzip (level 6)** | 252,470 B | **1.62x** | **0** | **0** | 0 ms | - |
+| **Static zstd+dict** | 46,123 B | **8.87x** | **0** | **0** | 19 ms | Stationary reference |
+| **Fixed-schedule (200/200)** | 46,009 B | **8.89x** | **4** | **0** | 86 ms | **Blind Schedule**: 4 retrains regardless of noise |
+| **Fixed-schedule (100/100)** | 60,792 B | **6.73x** | **9** | **0** | 167 ms | **Blind Schedule**: 9 retrains regardless of noise |
+| **Adaptive zdict (buffer=200)** | 46,123 B | **8.87x** | **0** | **0** | 19 ms | **Robust**: 0 false alarms despite noise & outliers |
+| **Adaptive zdict (buffer=100)** | 46,123 B | **8.87x** | **0** | **0** | 19 ms | **Robust**: 0 false alarms despite noise & outliers |
 
 #### Adaptive Variant Comparison: Buffer=100 vs Buffer=200
 
@@ -204,8 +250,9 @@ Evaluated across 4 switch points (`550, 650, 730, 800`) and 5 random seeds (`42,
 |---|---|---|---|
 | **Canonical Total Bytes** | 88,888 B | 70,681 B | **18,207 B saved** by buffer=100 due to earlier recovery |
 | **Time-to-Recovery** | 208 payloads | 108 payloads | **100 payloads faster** recovery for buffer=100 |
-| **Canonical Training Time** | 98 ms | 97 ms | Slightly faster dictionary training on 100 samples |
-| **Switch Point 800 Horizon** | Fails to retrain before stream end | **Recovers at #908** | Buffer=100 safely handles late-stage drift |
+| **Canonical Training Time** | 144 ms | 131 ms | Slightly faster dictionary training on 100 samples |
+| **Switch Point 800 Horizon** | Fails to retrain before stream end | **Recovers at #915** | Buffer=100 safely handles late-stage drift |
+
 
 
 ---
