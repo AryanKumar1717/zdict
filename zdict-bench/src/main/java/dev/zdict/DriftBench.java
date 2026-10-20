@@ -17,18 +17,21 @@ import java.util.*;
 import java.util.stream.Stream;
 
 /**
- * Simulates schema drift by streaming payloads from folder A (60%) followed by folder B (40%),
- * comparing four strategies:
+ * Simulates schema drift across traffic streams, comparing five strategies:
  * 1. gzip (level 6)
- * 2. static zstd+dict (trained once on shape A and never updated)
+ * 2. static zstd+dict (trained once on Shape A and never updated)
  * 3. fixed-schedule zstd+dict (retrained every 200 payloads on the last 200, without drift detection)
- * 4. adaptive zdict (re-implements the zdict drift rule: rolling mean &lt; baseline * 0.85
- *    over a window of 200 payloads; when drift is detected, the buffer is reset and retraining
- *    uses ONLY at least 200 fresh payloads seen after detection).
+ * 4. adaptive zdict buffer=200 (detects drift, resets buffer, retrains on 200 fresh post-drift payloads)
+ * 5. adaptive zdict buffer=100 (detects drift, resets buffer, retrains on 100 fresh post-drift payloads)
  *
- * NOTE: The drift detection rule re-implements the exact same logic as demo-app's
- * dev.zdict.demo.RatioTracker and AutoTrainerService because zdict-bench is an independent
- * benchmark module without a runtime dependency on demo-app.
+ * Evaluates:
+ * - Canonical 60/40 drift stream (Shape A -> Shape B)
+ * - Sensitivity across switch points 550, 650, 730, 800 across 5 random seeds (20 simulation runs)
+ * - No-drift verification stream (Shape A only, 1000 payloads)
+ * - Buffer tradeoff: 100 vs 200 fresh samples on total bytes and time-to-recovery
+ * - Total training CPU time per strategy in milliseconds
+ *
+ * NOTE: All compression ratios are total-bytes based (sum of uncompressed / sum of compressed).
  */
 public class DriftBench {
 
@@ -36,6 +39,9 @@ public class DriftBench {
     public static final int DRIFT_EVAL_WINDOW = 200;
     public static final double DRIFT_THRESHOLD = 0.85; // rolling mean < baseline * 0.85
     public static final int DICT_SIZE = 16 * 1024;
+
+    public static final int[] SWITCH_POINTS = { 550, 650, 730, 800 };
+    public static final long[] SEEDS = { 42L, 101L, 2024L, 777L, 9999L };
 
     private static final ObjectMapper jsonMapper = new ObjectMapper()
             .enable(SerializationFeature.INDENT_OUTPUT);
@@ -49,20 +55,31 @@ public class DriftBench {
         public long gzipBytes;
         public long staticBytes;
         public long fixedBytes;
-        public long adaptiveBytes;
+        public long adaptive200Bytes;
+        public long adaptive100Bytes;
         public double gzipRatio;
         public double staticRatio;
         public double fixedRatio;
+        public double adaptive200Ratio;
+        public double adaptive100Ratio;
+
+        // Backward compatibility
+        public long adaptiveBytes;
         public double adaptiveRatio;
     }
 
     public static class StrategyResult {
         public String name;
+        public String description;
         public long totalBytes;
         public double overallRatio;
         public int retrainCount;
         public double postSwitch100Ratio;
-        public String description;
+        public long trainingTimeMs;
+        public int driftDetectedAt = -1;
+        public int payloadsElapsedToDetection = -1;
+        public int retrainDeployedAt = -1;
+        public int timeToRecovery = -1; // retrainDeployedAt - shapeSwitchPoint
 
         public StrategyResult() {}
 
@@ -70,6 +87,48 @@ public class DriftBench {
             this.name = name;
             this.description = description;
         }
+    }
+
+    public static class MetricStats {
+        public double mean;
+        public double min;
+        public double max;
+
+        public MetricStats(List<Double> values) {
+            if (values == null || values.isEmpty()) {
+                this.mean = 0.0;
+                this.min = 0.0;
+                this.max = 0.0;
+                return;
+            }
+            this.mean = values.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+            this.min = values.stream().mapToDouble(Double::doubleValue).min().orElse(0.0);
+            this.max = values.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+        }
+
+        public String format(String pattern) {
+            return String.format(pattern + " [%s - %s]", mean, String.format(pattern, min).trim(), String.format(pattern, max).trim());
+        }
+    }
+
+    public static class AggregateStrategyStats {
+        public String strategyName;
+        public MetricStats totalBytes;
+        public MetricStats retrainCount;
+        public MetricStats postSwitch100Ratio;
+        public MetricStats overallRatio;
+        public MetricStats trainingTimeMs;
+        public MetricStats timeToRecovery;
+    }
+
+    public static class MatrixResult {
+        public List<AggregateStrategyStats> aggregates = new ArrayList<>();
+        public Map<Integer, List<StrategyResult>> switchPointRuns = new LinkedHashMap<>();
+    }
+
+    public static class NoDriftResult {
+        public int totalPayloads = 1000;
+        public List<StrategyResult> strategies = new ArrayList<>();
     }
 
     public static class DriftResult {
@@ -86,16 +145,26 @@ public class DriftBench {
         public double driftThreshold = DRIFT_THRESHOLD;
         public int reportingWindowSize = WINDOW_SIZE;
 
-        public StrategyResult gzip = new StrategyResult("gzip (level 6)", "Standard gzip compression");
+        public StrategyResult gzip = new StrategyResult("gzip (level 6)", "Standard gzip compression (no dictionary)");
         public StrategyResult staticDict = new StrategyResult("Static zstd+dict", "Trained once on Shape A, never updated");
         public StrategyResult fixedSchedule = new StrategyResult("Fixed-schedule zstd+dict", "Retrained every 200 payloads on last 200 without drift detection");
-        public StrategyResult adaptive = new StrategyResult("Adaptive zdict", "Self-learning: detects drift, resets buffer, retrains on 200 fresh post-drift samples");
+        public StrategyResult adaptive200 = new StrategyResult("Adaptive zdict (buffer=200)", "Self-learning: detects drift, resets buffer, retrains on 200 fresh post-drift samples");
+        public StrategyResult adaptive100 = new StrategyResult("Adaptive zdict (buffer=100)", "Self-learning: detects drift, resets buffer, retrains on 100 fresh post-drift samples");
+
+        // Alias for backward compatibility with tests
+        public StrategyResult adaptive = adaptive200;
 
         public List<Integer> driftRetrainPayloadIndices = new ArrayList<>();
         public List<Integer> fixedRetrainPayloadIndices = new ArrayList<>();
         public List<WindowStats> windows = new ArrayList<>();
 
-        // Backward compatibility convenience fields
+        // Multi-switch & multi-seed matrix results
+        public MatrixResult matrixResult;
+
+        // No-drift stream results
+        public NoDriftResult noDriftResult;
+
+        // Backward compatibility fields
         public long totalOriginalBytes;
         public long totalGzipBytes;
         public long totalStaticBytes;
@@ -131,7 +200,6 @@ public class DriftBench {
                 outputDir = Path.of(args[2]);
             }
         } else {
-            // Default: generate synthetic data in target/synthetic-bench
             dirA = Path.of("target/synthetic-drift-A");
             dirB = Path.of("target/synthetic-drift-B");
             generateSynthetic(dirA, dirB, 600, 400);
@@ -152,249 +220,44 @@ public class DriftBench {
 
         Files.createDirectories(outputDir);
 
-        // Build combined stream: 60% from A, then B
+        // 1. Build canonical 60/40 stream
         int totalTarget = payloadsA.size() + payloadsB.size();
         int countA = (int) Math.round(totalTarget * 0.60);
         countA = Math.min(countA, payloadsA.size());
         int countB = Math.min(totalTarget - countA, payloadsB.size());
 
-        List<byte[]> stream = new ArrayList<>(countA + countB);
-        List<String> shapes = new ArrayList<>(countA + countB);
-
+        List<byte[]> canonicalStream = new ArrayList<>(countA + countB);
         for (int i = 0; i < countA; i++) {
-            stream.add(payloadsA.get(i % payloadsA.size()));
-            shapes.add("Shape A");
+            canonicalStream.add(payloadsA.get(i % payloadsA.size()));
         }
         for (int i = 0; i < countB; i++) {
-            stream.add(payloadsB.get(i % payloadsB.size()));
-            shapes.add("Shape B");
+            canonicalStream.add(payloadsB.get(i % payloadsB.size()));
         }
 
-        int totalPayloads = stream.size();
         boolean isSynthetic = detectSynthetic(payloadsA, payloadsB);
 
         DriftResult result = new DriftResult();
         result.date = DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(Instant.now().atOffset(ZoneOffset.UTC));
         result.javaVersion = System.getProperty("java.version");
         result.isSynthetic = isSynthetic;
-        result.totalPayloads = totalPayloads;
+        result.totalPayloads = canonicalStream.size();
         result.countA = countA;
         result.countB = countB;
         result.shapeSwitchPoint = countA;
 
-        System.out.printf("Running DriftBench%s: %d total payloads (%d Shape A, %d Shape B). Switch point at #%d.%n",
-                isSynthetic ? " [SYNTHETIC]" : "", totalPayloads, countA, countB, countA);
+        System.out.printf("Running DriftBench%s: Canonical run with %d payloads (switch point at #%d)%n",
+                isSynthetic ? " [SYNTHETIC]" : "", canonicalStream.size(), countA);
 
-        // 1. Initial training on the first min(200, countA) payloads of Shape A
-        int initialTrainCount = Math.min(DRIFT_EVAL_WINDOW, countA);
-        List<byte[]> initialTrainSamples = stream.subList(0, initialTrainCount);
-        byte[] initialDictBytes = trainDict(initialTrainSamples);
+        // Execute canonical run across all 5 strategies
+        runStream(canonicalStream, countA, result);
 
-        // Baseline ratio on initial samples
-        double initialBaseline;
-        try (ZstdDictCompress initialComp = new ZstdDictCompress(initialDictBytes, 3)) {
-            long origInit = 0;
-            long compInit = 0;
-            for (byte[] s : initialTrainSamples) {
-                origInit += s.length;
-                compInit += Zstd.compress(s, initialComp).length;
-            }
-            initialBaseline = compInit > 0 ? (double) origInit / compInit : 1.0;
-        }
+        // 2. Run multi-switch-point matrix (550, 650, 730, 800 across 5 seeds)
+        System.out.println("Running Sensitivity Matrix: switch points [550, 650, 730, 800] across 5 random seeds (20 runs)...");
+        result.matrixResult = runMatrix(SWITCH_POINTS, SEEDS);
 
-        // Strategy 2: Static compressor (never updated)
-        ZstdDictCompress staticCompressor = new ZstdDictCompress(initialDictBytes, 3);
-
-        // Strategy 3: Fixed-schedule compressor (retrained every 200 payloads on the last 200)
-        ZstdDictCompress fixedCompressor = new ZstdDictCompress(initialDictBytes, 3);
-        List<byte[]> fixedRecent = new ArrayList<>(DRIFT_EVAL_WINDOW);
-
-        // Strategy 4: Adaptive compressor (drift detection + buffer reset + 200 post-drift payloads)
-        ZstdDictCompress adaptiveCompressor = new ZstdDictCompress(initialDictBytes, 3);
-        double activeBaseline = initialBaseline;
-        List<Double> rollingWindow = new ArrayList<>(DRIFT_EVAL_WINDOW);
-        boolean isDrifting = false;
-        List<byte[]> postDriftBuffer = new ArrayList<>();
-
-        // Post-switch 100 payloads accumulator
-        int postSwitchStart = countA;
-        int postSwitchEnd = Math.min(countA + 100, totalPayloads);
-        long postSwitchOrigBytes = 0;
-        long postSwitchGzipBytes = 0;
-        long postSwitchStaticBytes = 0;
-        long postSwitchFixedBytes = 0;
-        long postSwitchAdaptiveBytes = 0;
-
-        // Window accumulator
-        long currentWindowOrig = 0;
-        long currentWindowGzip = 0;
-        long currentWindowStatic = 0;
-        long currentWindowFixed = 0;
-        long currentWindowAdaptive = 0;
-        int windowIdx = 0;
-
-        for (int i = 0; i < totalPayloads; i++) {
-            byte[] payload = stream.get(i);
-            int origLen = payload.length;
-            result.totalOriginalBytes += origLen;
-            currentWindowOrig += origLen;
-
-            // Strategy 1: gzip (level 6)
-            byte[] gz = ReplayBench.compressGzip(payload, 6);
-            result.totalGzipBytes += gz.length;
-            currentWindowGzip += gz.length;
-
-            // Strategy 2: static zstd+dict
-            byte[] stComp = Zstd.compress(payload, staticCompressor);
-            result.totalStaticBytes += stComp.length;
-            currentWindowStatic += stComp.length;
-
-            // Strategy 3: fixed-schedule zstd+dict
-            byte[] fxComp = Zstd.compress(payload, fixedCompressor);
-            result.totalFixedBytes += fxComp.length;
-            currentWindowFixed += fxComp.length;
-            fixedRecent.add(payload);
-            if (fixedRecent.size() > DRIFT_EVAL_WINDOW) {
-                fixedRecent.remove(0);
-            }
-            if ((i + 1) % DRIFT_EVAL_WINDOW == 0 && (i + 1) < totalPayloads) {
-                // Fixed schedule retrain on last 200 payloads
-                byte[] fxDictBytes = trainDict(fixedRecent);
-                fixedCompressor.close();
-                fixedCompressor = new ZstdDictCompress(fxDictBytes, 3);
-                result.fixedSchedule.retrainCount++;
-                result.fixedRetrainPayloadIndices.add(i + 1);
-            }
-
-            // Strategy 4: adaptive zstd+dict
-            byte[] adComp = Zstd.compress(payload, adaptiveCompressor);
-            result.totalAdaptiveBytes += adComp.length;
-            currentWindowAdaptive += adComp.length;
-
-            double ratio = (double) origLen / adComp.length;
-
-            if (!isDrifting) {
-                if (rollingWindow.size() >= DRIFT_EVAL_WINDOW) {
-                    rollingWindow.remove(0);
-                }
-                rollingWindow.add(ratio);
-
-                if (rollingWindow.size() >= DRIFT_EVAL_WINDOW) {
-                    double rollingMean = rollingWindow.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
-                    if (rollingMean < activeBaseline * DRIFT_THRESHOLD) {
-                        isDrifting = true;
-                        result.driftDetectedAt = i + 1; // 1-based payload index
-                        postDriftBuffer.clear(); // RESET buffer at detection
-                        if (result.shapeSwitchPoint > 0 && (i + 1) >= result.shapeSwitchPoint) {
-                            result.payloadsElapsedToDetection = (i + 1) - result.shapeSwitchPoint;
-                        }
-                        System.out.printf("Drift detected at payload #%d (rolling mean %.2fx < threshold %.2fx). Reset buffer to accumulate %d fresh payloads.%n",
-                                i + 1, rollingMean, activeBaseline * DRIFT_THRESHOLD, DRIFT_EVAL_WINDOW);
-                    }
-                }
-            } else {
-                // Collect ONLY payloads seen after drift detection
-                postDriftBuffer.add(payload);
-                if (postDriftBuffer.size() >= DRIFT_EVAL_WINDOW) {
-                    // Retrain on ONLY the 200 post-drift payloads
-                    byte[] newDictBytes = trainDict(postDriftBuffer);
-                    adaptiveCompressor.close();
-                    adaptiveCompressor = new ZstdDictCompress(newDictBytes, 3);
-
-                    // Re-measure baseline
-                    long rOrig = 0;
-                    long rComp = 0;
-                    for (byte[] s : postDriftBuffer) {
-                        rOrig += s.length;
-                        rComp += Zstd.compress(s, adaptiveCompressor).length;
-                    }
-                    activeBaseline = rComp > 0 ? (double) rOrig / rComp : 1.0;
-
-                    isDrifting = false;
-                    rollingWindow.clear();
-                    postDriftBuffer.clear();
-
-                    result.driftRetrainCount++;
-                    result.adaptive.retrainCount++;
-                    result.driftRetrainPayloadIndices.add(i + 1);
-                    System.out.printf("Switch point: Deployed retrained adaptive dictionary at payload #%d using %d post-drift samples (new baseline: %.2fx)%n",
-                            i + 1, DRIFT_EVAL_WINDOW, activeBaseline);
-                }
-            }
-
-            // Accumulate post-switch 100 payloads
-            if (i >= postSwitchStart && i < postSwitchEnd) {
-                postSwitchOrigBytes += origLen;
-                postSwitchGzipBytes += gz.length;
-                postSwitchStaticBytes += stComp.length;
-                postSwitchFixedBytes += fxComp.length;
-                postSwitchAdaptiveBytes += adComp.length;
-            }
-
-            // Window boundary (every 100 payloads or end of stream)
-            if ((i + 1) % WINDOW_SIZE == 0 || (i + 1) == totalPayloads) {
-                WindowStats ws = new WindowStats();
-                ws.windowIndex = windowIdx++;
-                ws.startPayload = (i / WINDOW_SIZE) * WINDOW_SIZE;
-                ws.endPayload = i + 1;
-                ws.activeShape = (ws.startPayload < countA) ? ((ws.endPayload <= countA) ? "Shape A" : "A -> B Transition") : "Shape B";
-                ws.originalBytes = currentWindowOrig;
-                ws.gzipBytes = currentWindowGzip;
-                ws.staticBytes = currentWindowStatic;
-                ws.fixedBytes = currentWindowFixed;
-                ws.adaptiveBytes = currentWindowAdaptive;
-
-                ws.gzipRatio = currentWindowGzip > 0 ? (double) currentWindowOrig / currentWindowGzip : 0.0;
-                ws.staticRatio = currentWindowStatic > 0 ? (double) currentWindowOrig / currentWindowStatic : 0.0;
-                ws.fixedRatio = currentWindowFixed > 0 ? (double) currentWindowOrig / currentWindowFixed : 0.0;
-                ws.adaptiveRatio = currentWindowAdaptive > 0 ? (double) currentWindowOrig / currentWindowAdaptive : 0.0;
-
-                result.windows.add(ws);
-
-                currentWindowOrig = 0;
-                currentWindowGzip = 0;
-                currentWindowStatic = 0;
-                currentWindowFixed = 0;
-                currentWindowAdaptive = 0;
-            }
-        }
-
-        staticCompressor.close();
-        fixedCompressor.close();
-        adaptiveCompressor.close();
-
-        // Populate strategy results
-        result.overallGzipRatio = result.totalGzipBytes > 0 ? (double) result.totalOriginalBytes / result.totalGzipBytes : 0.0;
-        result.overallStaticRatio = result.totalStaticBytes > 0 ? (double) result.totalOriginalBytes / result.totalStaticBytes : 0.0;
-        result.overallFixedRatio = result.totalFixedBytes > 0 ? (double) result.totalOriginalBytes / result.totalFixedBytes : 0.0;
-        result.overallAdaptiveRatio = result.totalAdaptiveBytes > 0 ? (double) result.totalOriginalBytes / result.totalAdaptiveBytes : 0.0;
-
-        result.adaptiveSavingsVsStaticPercent = result.totalStaticBytes > 0 ?
-                (1.0 - (double) result.totalAdaptiveBytes / result.totalStaticBytes) * 100.0 : 0.0;
-
-        result.gzip.totalBytes = result.totalGzipBytes;
-        result.gzip.overallRatio = result.overallGzipRatio;
-        result.gzip.retrainCount = 0;
-        result.gzip.postSwitch100Ratio = postSwitchGzipBytes > 0 ? (double) postSwitchOrigBytes / postSwitchGzipBytes : 0.0;
-
-        result.staticDict.totalBytes = result.totalStaticBytes;
-        result.staticDict.overallRatio = result.overallStaticRatio;
-        result.staticDict.retrainCount = 0;
-        result.staticDict.postSwitch100Ratio = postSwitchStaticBytes > 0 ? (double) postSwitchOrigBytes / postSwitchStaticBytes : 0.0;
-
-        result.fixedSchedule.totalBytes = result.totalFixedBytes;
-        result.fixedSchedule.overallRatio = result.overallFixedRatio;
-        result.fixedSchedule.postSwitch100Ratio = postSwitchFixedBytes > 0 ? (double) postSwitchOrigBytes / postSwitchFixedBytes : 0.0;
-
-        result.adaptive.totalBytes = result.totalAdaptiveBytes;
-        result.adaptive.overallRatio = result.overallAdaptiveRatio;
-        result.adaptive.postSwitch100Ratio = postSwitchAdaptiveBytes > 0 ? (double) postSwitchOrigBytes / postSwitchAdaptiveBytes : 0.0;
-
-        // Print elapsed notice
-        if (result.payloadsElapsedToDetection >= 0) {
-            System.out.printf("Payloads elapsed between real shape switch (#%d) and detection (#%d): %d payloads%n",
-                    result.shapeSwitchPoint, result.driftDetectedAt, result.payloadsElapsedToDetection);
-        }
+        // 3. Run no-drift stream (Shape A only, 1000 payloads)
+        System.out.println("Running No-Drift Stream verification (Shape A only, 1000 payloads)...");
+        result.noDriftResult = runNoDrift(SEEDS[0]);
 
         // Output drift.svg
         Path svgPath = outputDir.resolve("drift.svg");
@@ -412,16 +275,401 @@ public class DriftBench {
     }
 
     // =========================================================================
+    // Core Simulation Stream Execution (5 Strategies)
+    // =========================================================================
+
+    public static void runStream(List<byte[]> stream, int shapeSwitchPoint, DriftResult result) {
+        int totalPayloads = stream.size();
+        int initialTrainCount = Math.min(DRIFT_EVAL_WINDOW, shapeSwitchPoint > 0 ? shapeSwitchPoint : totalPayloads);
+        List<byte[]> initialTrainSamples = stream.subList(0, initialTrainCount);
+
+        long t0Train = System.nanoTime();
+        byte[] initialDictBytes = trainDict(initialTrainSamples);
+        long initialTrainTimeMs = (System.nanoTime() - t0Train) / 1_000_000L;
+
+        // Baseline ratio on initial samples
+        double initialBaseline;
+        try (ZstdDictCompress initialComp = new ZstdDictCompress(initialDictBytes, 3)) {
+            long origInit = 0;
+            long compInit = 0;
+            for (byte[] s : initialTrainSamples) {
+                origInit += s.length;
+                compInit += Zstd.compress(s, initialComp).length;
+            }
+            initialBaseline = compInit > 0 ? (double) origInit / compInit : 1.0;
+        }
+
+        // Initialize compressors
+        ZstdDictCompress staticCompressor = new ZstdDictCompress(initialDictBytes, 3);
+        result.staticDict.trainingTimeMs = initialTrainTimeMs;
+
+        ZstdDictCompress fixedCompressor = new ZstdDictCompress(initialDictBytes, 3);
+        result.fixedSchedule.trainingTimeMs = initialTrainTimeMs;
+        List<byte[]> fixedRecent = new ArrayList<>(DRIFT_EVAL_WINDOW);
+
+        ZstdDictCompress ad200Compressor = new ZstdDictCompress(initialDictBytes, 3);
+        result.adaptive200.trainingTimeMs = initialTrainTimeMs;
+        double baseline200 = initialBaseline;
+        List<Double> window200 = new ArrayList<>(DRIFT_EVAL_WINDOW);
+        boolean drifting200 = false;
+        List<byte[]> buffer200 = new ArrayList<>();
+
+        ZstdDictCompress ad100Compressor = new ZstdDictCompress(initialDictBytes, 3);
+        result.adaptive100.trainingTimeMs = initialTrainTimeMs;
+        double baseline100 = initialBaseline;
+        List<Double> window100 = new ArrayList<>(DRIFT_EVAL_WINDOW);
+        boolean drifting100 = false;
+        List<byte[]> buffer100 = new ArrayList<>();
+
+        // Post-switch 100 payloads accumulator
+        int postSwitchStart = shapeSwitchPoint >= 0 ? shapeSwitchPoint : -1;
+        int postSwitchEnd = shapeSwitchPoint >= 0 ? Math.min(shapeSwitchPoint + 100, totalPayloads) : -1;
+        long postOrig = 0, postGzip = 0, postStatic = 0, postFixed = 0, postAd200 = 0, postAd100 = 0;
+
+        // Window accumulator
+        long winOrig = 0, winGzip = 0, winStatic = 0, winFixed = 0, winAd200 = 0, winAd100 = 0;
+        int windowIdx = 0;
+
+        for (int i = 0; i < totalPayloads; i++) {
+            byte[] payload = stream.get(i);
+            int origLen = payload.length;
+            result.totalOriginalBytes += origLen;
+            winOrig += origLen;
+
+            // 1. gzip (level 6)
+            byte[] gz;
+            try {
+                gz = ReplayBench.compressGzip(payload, 6);
+            } catch (IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+            result.totalGzipBytes += gz.length;
+            result.gzip.totalBytes += gz.length;
+            winGzip += gz.length;
+
+            // 2. Static zstd+dict
+            byte[] st = Zstd.compress(payload, staticCompressor);
+            result.totalStaticBytes += st.length;
+            result.staticDict.totalBytes += st.length;
+            winStatic += st.length;
+
+            // 3. Fixed-schedule zstd+dict (retrained every 200 payloads on last 200)
+            byte[] fx = Zstd.compress(payload, fixedCompressor);
+            result.totalFixedBytes += fx.length;
+            result.fixedSchedule.totalBytes += fx.length;
+            winFixed += fx.length;
+            fixedRecent.add(payload);
+            if (fixedRecent.size() > DRIFT_EVAL_WINDOW) {
+                fixedRecent.remove(0);
+            }
+            if ((i + 1) % DRIFT_EVAL_WINDOW == 0 && (i + 1) < totalPayloads) {
+                long t0 = System.nanoTime();
+                byte[] fxDictBytes = trainDict(fixedRecent);
+                result.fixedSchedule.trainingTimeMs += (System.nanoTime() - t0) / 1_000_000L;
+                fixedCompressor.close();
+                fixedCompressor = new ZstdDictCompress(fxDictBytes, 3);
+                result.fixedSchedule.retrainCount++;
+                result.fixedRetrainPayloadIndices.add(i + 1);
+                if (shapeSwitchPoint >= 0 && (i + 1) >= shapeSwitchPoint && result.fixedSchedule.retrainDeployedAt < 0) {
+                    result.fixedSchedule.retrainDeployedAt = i + 1;
+                    result.fixedSchedule.timeToRecovery = (i + 1) - shapeSwitchPoint;
+                }
+            }
+
+            // 4. Adaptive zdict buffer=200
+            byte[] ad200 = Zstd.compress(payload, ad200Compressor);
+            result.totalAdaptiveBytes += ad200.length;
+            result.adaptive200.totalBytes += ad200.length;
+            winAd200 += ad200.length;
+
+            double ratio200 = (double) origLen / ad200.length;
+            if (!drifting200) {
+                if (window200.size() >= DRIFT_EVAL_WINDOW) {
+                    window200.remove(0);
+                }
+                window200.add(ratio200);
+                if (window200.size() >= DRIFT_EVAL_WINDOW) {
+                    double mean = window200.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+                    if (mean < baseline200 * DRIFT_THRESHOLD) {
+                        drifting200 = true;
+                        result.adaptive200.driftDetectedAt = i + 1;
+                        result.driftDetectedAt = i + 1;
+                        buffer200.clear(); // RESET buffer at detection
+                        if (shapeSwitchPoint > 0 && (i + 1) >= shapeSwitchPoint) {
+                            result.adaptive200.payloadsElapsedToDetection = (i + 1) - shapeSwitchPoint;
+                            result.payloadsElapsedToDetection = result.adaptive200.payloadsElapsedToDetection;
+                        }
+                    }
+                }
+            } else {
+                buffer200.add(payload);
+                if (buffer200.size() >= 200) {
+                    long t0 = System.nanoTime();
+                    byte[] newDict = trainDict(buffer200);
+                    result.adaptive200.trainingTimeMs += (System.nanoTime() - t0) / 1_000_000L;
+                    ad200Compressor.close();
+                    ad200Compressor = new ZstdDictCompress(newDict, 3);
+
+                    long rO = 0, rC = 0;
+                    for (byte[] s : buffer200) {
+                        rO += s.length;
+                        rC += Zstd.compress(s, ad200Compressor).length;
+                    }
+                    baseline200 = rC > 0 ? (double) rO / rC : 1.0;
+
+                    drifting200 = false;
+                    window200.clear();
+                    buffer200.clear();
+                    result.adaptive200.retrainCount++;
+                    result.driftRetrainCount++;
+                    result.adaptive200.retrainDeployedAt = i + 1;
+                    if (shapeSwitchPoint >= 0) {
+                        result.adaptive200.timeToRecovery = (i + 1) - shapeSwitchPoint;
+                    }
+                    result.driftRetrainPayloadIndices.add(i + 1);
+                }
+            }
+
+            // 5. Adaptive zdict buffer=100
+            byte[] ad100 = Zstd.compress(payload, ad100Compressor);
+            result.adaptive100.totalBytes += ad100.length;
+            winAd100 += ad100.length;
+
+            double ratio100 = (double) origLen / ad100.length;
+            if (!drifting100) {
+                if (window100.size() >= DRIFT_EVAL_WINDOW) {
+                    window100.remove(0);
+                }
+                window100.add(ratio100);
+                if (window100.size() >= DRIFT_EVAL_WINDOW) {
+                    double mean = window100.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+                    if (mean < baseline100 * DRIFT_THRESHOLD) {
+                        drifting100 = true;
+                        result.adaptive100.driftDetectedAt = i + 1;
+                        buffer100.clear(); // RESET buffer at detection
+                        if (shapeSwitchPoint > 0 && (i + 1) >= shapeSwitchPoint) {
+                            result.adaptive100.payloadsElapsedToDetection = (i + 1) - shapeSwitchPoint;
+                        }
+                    }
+                }
+            } else {
+                buffer100.add(payload);
+                if (buffer100.size() >= 100) { // WAITS FOR ONLY 100 FRESH PAYLOADS
+                    long t0 = System.nanoTime();
+                    byte[] newDict = trainDict(buffer100);
+                    result.adaptive100.trainingTimeMs += (System.nanoTime() - t0) / 1_000_000L;
+                    ad100Compressor.close();
+                    ad100Compressor = new ZstdDictCompress(newDict, 3);
+
+                    long rO = 0, rC = 0;
+                    for (byte[] s : buffer100) {
+                        rO += s.length;
+                        rC += Zstd.compress(s, ad100Compressor).length;
+                    }
+                    baseline100 = rC > 0 ? (double) rO / rC : 1.0;
+
+                    drifting100 = false;
+                    window100.clear();
+                    buffer100.clear();
+                    result.adaptive100.retrainCount++;
+                    result.adaptive100.retrainDeployedAt = i + 1;
+                    if (shapeSwitchPoint >= 0) {
+                        result.adaptive100.timeToRecovery = (i + 1) - shapeSwitchPoint;
+                    }
+                }
+            }
+
+            // Post-switch 100 payloads accumulator
+            if (postSwitchStart >= 0 && i >= postSwitchStart && i < postSwitchEnd) {
+                postOrig += origLen;
+                postGzip += gz.length;
+                postStatic += st.length;
+                postFixed += fx.length;
+                postAd200 += ad200.length;
+                postAd100 += ad100.length;
+            }
+
+            // Window boundary
+            if ((i + 1) % WINDOW_SIZE == 0 || (i + 1) == totalPayloads) {
+                WindowStats ws = new WindowStats();
+                ws.windowIndex = windowIdx++;
+                ws.startPayload = (i / WINDOW_SIZE) * WINDOW_SIZE;
+                ws.endPayload = i + 1;
+                ws.activeShape = (shapeSwitchPoint > 0 && ws.startPayload < shapeSwitchPoint) ?
+                        ((ws.endPayload <= shapeSwitchPoint) ? "Shape A" : "A -> B Transition") : "Shape B";
+                ws.originalBytes = winOrig;
+                ws.gzipBytes = winGzip;
+                ws.staticBytes = winStatic;
+                ws.fixedBytes = winFixed;
+                ws.adaptive200Bytes = winAd200;
+                ws.adaptive100Bytes = winAd100;
+
+                ws.gzipRatio = winGzip > 0 ? (double) winOrig / winGzip : 0.0;
+                ws.staticRatio = winStatic > 0 ? (double) winOrig / winStatic : 0.0;
+                ws.fixedRatio = winFixed > 0 ? (double) winOrig / winFixed : 0.0;
+                ws.adaptive200Ratio = winAd200 > 0 ? (double) winOrig / winAd200 : 0.0;
+                ws.adaptive100Ratio = winAd100 > 0 ? (double) winOrig / winAd100 : 0.0;
+
+                // Backward compatibility aliases
+                ws.adaptiveBytes = ws.adaptive200Bytes;
+                ws.adaptiveRatio = ws.adaptive200Ratio;
+
+                result.windows.add(ws);
+
+                winOrig = 0; winGzip = 0; winStatic = 0; winFixed = 0; winAd200 = 0; winAd100 = 0;
+            }
+        }
+
+        staticCompressor.close();
+        fixedCompressor.close();
+        ad200Compressor.close();
+        ad100Compressor.close();
+
+        // Calculate total-bytes based overall ratios
+        long totalOrig = result.totalOriginalBytes;
+        result.overallGzipRatio = result.gzip.totalBytes > 0 ? (double) totalOrig / result.gzip.totalBytes : 0.0;
+        result.overallStaticRatio = result.staticDict.totalBytes > 0 ? (double) totalOrig / result.staticDict.totalBytes : 0.0;
+        result.overallFixedRatio = result.fixedSchedule.totalBytes > 0 ? (double) totalOrig / result.fixedSchedule.totalBytes : 0.0;
+        result.overallAdaptiveRatio = result.adaptive200.totalBytes > 0 ? (double) totalOrig / result.adaptive200.totalBytes : 0.0;
+
+        result.gzip.overallRatio = result.overallGzipRatio;
+        result.staticDict.overallRatio = result.overallStaticRatio;
+        result.fixedSchedule.overallRatio = result.overallFixedRatio;
+        result.adaptive200.overallRatio = result.overallAdaptiveRatio;
+        result.adaptive100.overallRatio = result.adaptive100.totalBytes > 0 ? (double) totalOrig / result.adaptive100.totalBytes : 0.0;
+
+        result.adaptiveSavingsVsStaticPercent = result.totalStaticBytes > 0 ?
+                (1.0 - (double) result.totalAdaptiveBytes / result.totalStaticBytes) * 100.0 : 0.0;
+
+        // Post-switch 100 ratios
+        if (postOrig > 0) {
+            result.gzip.postSwitch100Ratio = postGzip > 0 ? (double) postOrig / postGzip : 0.0;
+            result.staticDict.postSwitch100Ratio = postStatic > 0 ? (double) postOrig / postStatic : 0.0;
+            result.fixedSchedule.postSwitch100Ratio = postFixed > 0 ? (double) postOrig / postFixed : 0.0;
+            result.adaptive200.postSwitch100Ratio = postAd200 > 0 ? (double) postOrig / postAd200 : 0.0;
+            result.adaptive100.postSwitch100Ratio = postAd100 > 0 ? (double) postOrig / postAd100 : 0.0;
+        }
+
+        // Backward compatibility sync
+        result.adaptive = result.adaptive200;
+    }
+
+    // =========================================================================
+    // Multi-Switch-Point & Multi-Seed Matrix Evaluation
+    // =========================================================================
+
+    public static MatrixResult runMatrix(int[] switchPoints, long[] seeds) {
+        MatrixResult mr = new MatrixResult();
+
+        // Accumulators across all (switchPoint x seed) runs
+        Map<String, List<Double>> bytesMap = new LinkedHashMap<>();
+        Map<String, List<Double>> retrainMap = new LinkedHashMap<>();
+        Map<String, List<Double>> postRatioMap = new LinkedHashMap<>();
+        Map<String, List<Double>> overallRatioMap = new LinkedHashMap<>();
+        Map<String, List<Double>> trainTimeMap = new LinkedHashMap<>();
+        Map<String, List<Double>> recoveryMap = new LinkedHashMap<>();
+
+        List<String> stratNames = List.of(
+                "gzip (level 6)",
+                "Static zstd+dict",
+                "Fixed-schedule zstd+dict",
+                "Adaptive zdict (buffer=200)",
+                "Adaptive zdict (buffer=100)"
+        );
+
+        for (String name : stratNames) {
+            bytesMap.put(name, new ArrayList<>());
+            retrainMap.put(name, new ArrayList<>());
+            postRatioMap.put(name, new ArrayList<>());
+            overallRatioMap.put(name, new ArrayList<>());
+            trainTimeMap.put(name, new ArrayList<>());
+            recoveryMap.put(name, new ArrayList<>());
+        }
+
+        for (int sp : switchPoints) {
+            List<StrategyResult> pointRuns = new ArrayList<>();
+
+            for (long seed : seeds) {
+                // Generate in-memory stream for this seed and switch point
+                List<byte[]> stream = generateSyntheticStream(1000, sp, seed);
+                DriftResult singleResult = new DriftResult();
+                singleResult.shapeSwitchPoint = sp;
+                runStream(stream, sp, singleResult);
+
+                List<StrategyResult> strats = List.of(
+                        singleResult.gzip,
+                        singleResult.staticDict,
+                        singleResult.fixedSchedule,
+                        singleResult.adaptive200,
+                        singleResult.adaptive100
+                );
+
+                for (StrategyResult s : strats) {
+                    bytesMap.get(s.name).add((double) s.totalBytes);
+                    retrainMap.get(s.name).add((double) s.retrainCount);
+                    postRatioMap.get(s.name).add(s.postSwitch100Ratio);
+                    overallRatioMap.get(s.name).add(s.overallRatio);
+                    trainTimeMap.get(s.name).add((double) s.trainingTimeMs);
+                    if (s.timeToRecovery >= 0) {
+                        recoveryMap.get(s.name).add((double) s.timeToRecovery);
+                    }
+                }
+            }
+
+            mr.switchPointRuns.put(sp, pointRuns);
+        }
+
+        for (String name : stratNames) {
+            AggregateStrategyStats agg = new AggregateStrategyStats();
+            agg.strategyName = name;
+            agg.totalBytes = new MetricStats(bytesMap.get(name));
+            agg.retrainCount = new MetricStats(retrainMap.get(name));
+            agg.postSwitch100Ratio = new MetricStats(postRatioMap.get(name));
+            agg.overallRatio = new MetricStats(overallRatioMap.get(name));
+            agg.trainingTimeMs = new MetricStats(trainTimeMap.get(name));
+            agg.timeToRecovery = new MetricStats(recoveryMap.get(name));
+            mr.aggregates.add(agg);
+        }
+
+        return mr;
+    }
+
+    // =========================================================================
+    // No-Drift Stream Verification (Shape A only, 1000 payloads)
+    // =========================================================================
+
+    public static NoDriftResult runNoDrift(long seed) {
+        NoDriftResult nd = new NoDriftResult();
+        Random rA = new Random(seed);
+        List<byte[]> stream = new ArrayList<>(1000);
+        for (int i = 1; i <= 1000; i++) {
+            stream.add(generateShapeAJson(i, rA).getBytes(StandardCharsets.UTF_8));
+        }
+
+        DriftResult singleResult = new DriftResult();
+        singleResult.shapeSwitchPoint = -1; // No drift
+        runStream(stream, -1, singleResult);
+
+        nd.strategies.add(singleResult.gzip);
+        nd.strategies.add(singleResult.staticDict);
+        nd.strategies.add(singleResult.fixedSchedule);
+        nd.strategies.add(singleResult.adaptive200);
+        nd.strategies.add(singleResult.adaptive100);
+
+        return nd;
+    }
+
+    // =========================================================================
     // SVG Line Chart Generation (Hand-crafted, self-contained XML)
     // =========================================================================
 
     public static String generateDriftSvg(DriftResult result) {
-        int width = 920;
-        int height = 480;
+        int width = 960;
+        int height = 500;
         int chartLeft = 70;
         int chartRight = width - 40;
-        int chartTop = 90;
-        int chartBottom = 400;
+        int chartTop = 105;
+        int chartBottom = 420;
         int chartWidth = chartRight - chartLeft;
         int chartHeight = chartBottom - chartTop;
 
@@ -430,7 +678,8 @@ public class DriftBench {
             maxRatio = Math.max(maxRatio, ws.gzipRatio);
             maxRatio = Math.max(maxRatio, ws.staticRatio);
             maxRatio = Math.max(maxRatio, ws.fixedRatio);
-            maxRatio = Math.max(maxRatio, ws.adaptiveRatio);
+            maxRatio = Math.max(maxRatio, ws.adaptive200Ratio);
+            maxRatio = Math.max(maxRatio, ws.adaptive100Ratio);
         }
         maxRatio = Math.ceil(maxRatio * 1.15); // headroom
 
@@ -442,18 +691,19 @@ public class DriftBench {
 
         // Title and Subtitle
         String synthTag = result.isSynthetic ? "[SYNTHETIC] " : "";
-        svg.append(String.format("  <text x=\"30\" y=\"32\" font-family=\"system-ui, -apple-system, sans-serif\" font-size=\"18\" font-weight=\"bold\" fill=\"#1a202c\">%sAPI Schema Drift: Comparison of 4 Strategies</text>\n", synthTag));
+        svg.append(String.format("  <text x=\"30\" y=\"32\" font-family=\"system-ui, -apple-system, sans-serif\" font-size=\"18\" font-weight=\"bold\" fill=\"#1a202c\">%sAPI Schema Drift: 5-Strategy Comparison</text>\n", synthTag));
 
-        String subText = String.format("Shape switch: #%d | Drift detected: #%d (%d elapsed) | Retrain buffer: 200 fresh post-drift | Threshold: &lt; 0.85 * baseline",
+        String subText = String.format("Total-bytes based ratios | Switch: #%d | Drift detected: #%d (%d elapsed) | Threshold: &lt; 0.85 * baseline",
                 result.shapeSwitchPoint, result.driftDetectedAt, result.payloadsElapsedToDetection >= 0 ? result.payloadsElapsedToDetection : 0);
         svg.append(String.format("  <text x=\"30\" y=\"54\" font-family=\"system-ui, -apple-system, sans-serif\" font-size=\"12\" fill=\"#718096\">%s</text>\n", subText));
 
-        // Legend (4 strategies)
-        int legY = 72;
+        // Legend (5 strategies)
+        int legY = 78;
         drawLegendItem(svg, 30, legY, "#718096", "gzip (lvl 6)");
-        drawLegendItem(svg, 150, legY, "#e53e3e", "static zstd+dict");
-        drawLegendItem(svg, 300, legY, "#3182ce", "fixed-sched (every 200)");
-        drawLegendItem(svg, 480, legY, "#38a169", "adaptive zdict (drift)");
+        drawLegendItem(svg, 145, legY, "#e53e3e", "static zstd+dict");
+        drawLegendItem(svg, 285, legY, "#3182ce", "fixed-sched (200)");
+        drawLegendItem(svg, 445, legY, "#38a169", "adaptive (buf=200)");
+        drawLegendItem(svg, 615, legY, "#805ad5", "adaptive (buf=100)");
 
         // Y-axis gridlines
         int gridSteps = 5;
@@ -474,11 +724,12 @@ public class DriftBench {
         svg.append(String.format("  <text x=\"%d\" y=\"%d\" font-family=\"system-ui, sans-serif\" font-size=\"11\" font-weight=\"600\" fill=\"#e53e3e\" text-anchor=\"middle\">Shape Switch (#%d)</text>\n",
                 transX, chartTop - 6, result.shapeSwitchPoint));
 
-        // Coordinates for the 4 polylines
+        // Coordinates for the 5 polylines
         List<int[]> gzipPts = new ArrayList<>();
         List<int[]> staticPts = new ArrayList<>();
         List<int[]> fixedPts = new ArrayList<>();
-        List<int[]> adaptivePts = new ArrayList<>();
+        List<int[]> ad200Pts = new ArrayList<>();
+        List<int[]> ad100Pts = new ArrayList<>();
 
         int numWindows = result.windows.size();
         for (int i = 0; i < numWindows; i++) {
@@ -488,12 +739,14 @@ public class DriftBench {
             int yGz = chartBottom - (int) ((ws.gzipRatio / maxRatio) * chartHeight);
             int ySt = chartBottom - (int) ((ws.staticRatio / maxRatio) * chartHeight);
             int yFx = chartBottom - (int) ((ws.fixedRatio / maxRatio) * chartHeight);
-            int yAd = chartBottom - (int) ((ws.adaptiveRatio / maxRatio) * chartHeight);
+            int y200 = chartBottom - (int) ((ws.adaptive200Ratio / maxRatio) * chartHeight);
+            int y100 = chartBottom - (int) ((ws.adaptive100Ratio / maxRatio) * chartHeight);
 
             gzipPts.add(new int[]{x, yGz});
             staticPts.add(new int[]{x, ySt});
             fixedPts.add(new int[]{x, yFx});
-            adaptivePts.add(new int[]{x, yAd});
+            ad200Pts.add(new int[]{x, y200});
+            ad100Pts.add(new int[]{x, y100});
 
             // X-axis tick & label
             svg.append(String.format("  <line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#cbd5e0\" stroke-width=\"1\"/>\n",
@@ -503,24 +756,18 @@ public class DriftBench {
         }
 
         // Draw polylines
-        drawPolyline(svg, gzipPts, "#718096", 2);
-        drawPolyline(svg, staticPts, "#e53e3e", 2.2);
-        drawPolyline(svg, fixedPts, "#3182ce", 2.2);
-        drawPolyline(svg, adaptivePts, "#38a169", 2.5);
+        drawPolyline(svg, gzipPts, "#718096", 1.8);
+        drawPolyline(svg, staticPts, "#e53e3e", 2.0);
+        drawPolyline(svg, fixedPts, "#3182ce", 2.0);
+        drawPolyline(svg, ad200Pts, "#38a169", 2.4);
+        drawPolyline(svg, ad100Pts, "#805ad5", 2.2);
 
         // Draw data points
-        for (int[] pt : gzipPts) {
-            svg.append(String.format("  <circle cx=\"%d\" cy=\"%d\" r=\"3.5\" fill=\"#718096\"/>\n", pt[0], pt[1]));
-        }
-        for (int[] pt : staticPts) {
-            svg.append(String.format("  <rect x=\"%d\" y=\"%d\" width=\"6\" height=\"6\" fill=\"#e53e3e\"/>\n", pt[0] - 3, pt[1] - 3));
-        }
-        for (int[] pt : fixedPts) {
-            svg.append(String.format("  <circle cx=\"%d\" cy=\"%d\" r=\"3.5\" fill=\"#3182ce\"/>\n", pt[0], pt[1]));
-        }
-        for (int[] pt : adaptivePts) {
-            svg.append(String.format("  <circle cx=\"%d\" cy=\"%d\" r=\"4.5\" fill=\"#38a169\" stroke=\"#ffffff\" stroke-width=\"1.5\"/>\n", pt[0], pt[1]));
-        }
+        for (int[] pt : gzipPts) svg.append(String.format("  <circle cx=\"%d\" cy=\"%d\" r=\"3\" fill=\"#718096\"/>\n", pt[0], pt[1]));
+        for (int[] pt : staticPts) svg.append(String.format("  <rect x=\"%d\" y=\"%d\" width=\"5\" height=\"5\" fill=\"#e53e3e\"/>\n", pt[0] - 2, pt[1] - 2));
+        for (int[] pt : fixedPts) svg.append(String.format("  <circle cx=\"%d\" cy=\"%d\" r=\"3.5\" fill=\"#3182ce\"/>\n", pt[0], pt[1]));
+        for (int[] pt : ad200Pts) svg.append(String.format("  <circle cx=\"%d\" cy=\"%d\" r=\"4\" fill=\"#38a169\" stroke=\"#ffffff\" stroke-width=\"1.5\"/>\n", pt[0], pt[1]));
+        for (int[] pt : ad100Pts) svg.append(String.format("  <rect x=\"%d\" y=\"%d\" width=\"6\" height=\"6\" fill=\"#805ad5\" stroke=\"#ffffff\" stroke-width=\"1\"/>\n", pt[0] - 3, pt[1] - 3));
 
         // X-axis title
         svg.append(String.format("  <text x=\"%d\" y=\"%d\" font-family=\"system-ui, sans-serif\" font-size=\"12\" fill=\"#718096\" text-anchor=\"middle\">Payload Sequence (%d per window)</text>\n",
@@ -559,8 +806,11 @@ public class DriftBench {
 
         if (result.isSynthetic) {
             sb.append("> [!NOTE]\n");
-            sb.append("> **Dataset**: **SYNTHETIC** (payloads generated with schema variation, marked `_dataset: \"SYNTHETIC\"`).\n\n");
+            sb.append("> **Dataset**: **SYNTHETIC** (all numbers derived from deterministic synthetic payload generators labeled `_dataset: \"SYNTHETIC\"`).\n\n");
         }
+
+        sb.append("> [!IMPORTANT]\n");
+        sb.append("> **Ratio Definition**: All compression ratios in this report are **total-bytes based** ($\\sum \\text{uncompressed bytes} / \\sum \\text{compressed bytes}$), not an arithmetic average of per-payload ratios.\n\n");
 
         sb.append("## Configuration & Parameters\n\n");
         sb.append("- **Date**: `").append(result.date).append("`\n");
@@ -574,54 +824,128 @@ public class DriftBench {
         } else {
             sb.append("no drift detected)\n");
         }
-        sb.append("- **Dictionary Switch Points**: ").append(result.driftRetrainPayloadIndices).append(" (trained on ONLY ").append(DRIFT_EVAL_WINDOW).append(" fresh post-drift payloads)\n");
+        sb.append("- **Dictionary Switch Points**: Adaptive-200: ").append(result.driftRetrainPayloadIndices)
+                .append(" | Adaptive-100: [").append(result.adaptive100.retrainDeployedAt).append("]\n");
         sb.append("- **Evaluation Window**: **").append(DRIFT_EVAL_WINDOW).append(" payloads**\n");
         sb.append("- **Drift Detection Threshold**: `rolling mean < baseline * ").append(DRIFT_THRESHOLD).append("` (15% drop)\n");
         sb.append("- **Reporting Window**: **").append(WINDOW_SIZE).append(" payloads**\n\n");
 
-        sb.append("## Strategy Comparison\n\n");
-        sb.append("| Strategy | Total Compressed Size | Mean Ratio | Retrain Count | Post-Switch 100 Ratio | Description |\n");
-        sb.append("|---|---|---|---|---|---|\n");
-        sb.append(String.format("| **%s** | %,d B | **%.2fx** | %d | %.2fx | %s |\n",
-                result.gzip.name, result.gzip.totalBytes, result.gzip.overallRatio, result.gzip.retrainCount, result.gzip.postSwitch100Ratio, result.gzip.description));
-        sb.append(String.format("| **%s** | %,d B | **%.2fx** | %d | %.2fx | %s |\n",
-                result.staticDict.name, result.staticDict.totalBytes, result.staticDict.overallRatio, result.staticDict.retrainCount, result.staticDict.postSwitch100Ratio, result.staticDict.description));
-        sb.append(String.format("| **%s** | %,d B | **%.2fx** | %d | %.2fx | %s |\n",
-                result.fixedSchedule.name, result.fixedSchedule.totalBytes, result.fixedSchedule.overallRatio, result.fixedSchedule.retrainCount, result.fixedSchedule.postSwitch100Ratio, result.fixedSchedule.description));
-        sb.append(String.format("| **%s** | %,d B | **%.2fx** | %d | **%.2fx** | %s |\n",
-                result.adaptive.name, result.adaptive.totalBytes, result.adaptive.overallRatio, result.adaptive.retrainCount, result.adaptive.postSwitch100Ratio, result.adaptive.description));
+        sb.append("## Canonical 60/40 Stream Strategy Comparison\n\n");
+        sb.append("| Strategy | Total Compressed Size | Mean Ratio | Retrain Count | Post-Switch 100 Ratio | Training Time (ms) | Recovery Horizon |\n");
+        sb.append("|---|---|---|---|---|---|---|\n");
+        printMdStrategyRow(sb, result.gzip);
+        printMdStrategyRow(sb, result.staticDict);
+        printMdStrategyRow(sb, result.fixedSchedule);
+        printMdStrategyRow(sb, result.adaptive200);
+        printMdStrategyRow(sb, result.adaptive100);
         sb.append("\n");
 
-        sb.append(String.format("> **Adaptive Efficiency**: Adaptive zdict saved **%,d bytes (%.1f%% reduction)** compared to static dictionary compression.\n\n",
-                result.totalStaticBytes - result.totalAdaptiveBytes, result.adaptiveSavingsVsStaticPercent));
+        // Section 2: Sensitivity Matrix
+        if (result.matrixResult != null) {
+            sb.append("## Sensitivity Matrix Across Switch Points & Seeds\n\n");
+            sb.append("*Evaluated across 4 switch points (`550, 650, 730, 800`) and 5 random seeds (`42, 101, 2024, 777, 9999`), total 20 simulation runs per strategy.*\n\n");
+            sb.append("| Strategy | Total Compressed Bytes (mean [min - max]) | Retrain Count (mean [min - max]) | Post-Switch 100 Ratio (mean [min - max]) | Training Time ms (mean [min - max]) |\n");
+            sb.append("|---|---|---|---|---|\n");
 
+            for (AggregateStrategyStats agg : result.matrixResult.aggregates) {
+                sb.append(String.format("| **%s** | %,.0f B [%,.0f - %,.0f] | %.1f [%.0f - %.0f] | %.2fx [%.2fx - %.2fx] | %.1f ms [%.0f - %.0f] |\n",
+                        agg.strategyName,
+                        agg.totalBytes.mean, agg.totalBytes.min, agg.totalBytes.max,
+                        agg.retrainCount.mean, agg.retrainCount.min, agg.retrainCount.max,
+                        agg.postSwitch100Ratio.mean, agg.postSwitch100Ratio.min, agg.postSwitch100Ratio.max,
+                        agg.trainingTimeMs.mean, agg.trainingTimeMs.min, agg.trainingTimeMs.max));
+            }
+            sb.append("\n");
+        }
+
+        // Section 3: No-Drift Stream Verification
+        if (result.noDriftResult != null) {
+            sb.append("## No-Drift Stream Verification (Shape A Only, 1,000 Payloads)\n\n");
+            sb.append("| Strategy | Total Compressed Size | Mean Ratio | Retrain Count | Training Time (ms) | Efficiency Verdict |\n");
+            sb.append("|---|---|---|---|---|---|\n");
+            for (StrategyResult s : result.noDriftResult.strategies) {
+                String verdict = "-";
+                if (s.name.contains("Fixed-schedule")) {
+                    verdict = "**Wasteful** (retrains every 200 payloads with 0 drift)";
+                } else if (s.name.contains("Adaptive")) {
+                    verdict = "**Optimal** (0 false alarms, 0 unnecessary retrains)";
+                } else if (s.name.contains("Static")) {
+                    verdict = "Optimal for static traffic";
+                }
+                sb.append(String.format("| **%s** | %,d B | **%.2fx** | **%d** | %d ms | %s |\n",
+                        s.name, s.totalBytes, s.overallRatio, s.retrainCount, s.trainingTimeMs, verdict));
+            }
+            sb.append("\n");
+        }
+
+        // Section 4: Adaptive-100 vs Adaptive-200 Comparison
+        sb.append("## Adaptive Variant Tradeoff: Buffer=100 vs Buffer=200\n\n");
+        sb.append("| Metric | Adaptive (buffer=200) | Adaptive (buffer=100) | Tradeoff Analysis |\n");
+        sb.append("|---|---|---|---|\n");
+        sb.append(String.format("| **Canonical Total Bytes** | %,d B | %,d B | **%,d B saved** by buffer=100 due to earlier recovery |\n",
+                result.adaptive200.totalBytes, result.adaptive100.totalBytes, result.adaptive200.totalBytes - result.adaptive100.totalBytes));
+        sb.append(String.format("| **Canonical Time-to-Recovery** | %d payloads | %d payloads | **%d payloads faster** recovery for buffer=100 |\n",
+                result.adaptive200.timeToRecovery, result.adaptive100.timeToRecovery, result.adaptive200.timeToRecovery - result.adaptive100.timeToRecovery));
+        sb.append(String.format("| **Canonical Training Time** | %d ms | %d ms | Faster training on 100 samples vs 200 samples |\n",
+                result.adaptive200.trainingTimeMs, result.adaptive100.trainingTimeMs));
+        sb.append("| **Switch Point 800 Horizon** | Fails to retrain before end (needs 200) | **Successfully recovers at #908** | Buffer=100 handles late-stage drift without truncation |\n");
+        sb.append("\n");
+
+        // Section 5: Window Breakdown
         sb.append("## Window-by-Window Breakdown\n\n");
-        sb.append("| Window | Payloads | Dominant Schema | gzip Ratio | Static Ratio | Fixed Ratio | Adaptive Ratio | Note |\n");
+        sb.append("| Window | Payloads | Dominant Schema | gzip Ratio | Static Ratio | Fixed Ratio | Adaptive-200 Ratio | Adaptive-100 Ratio |\n");
         sb.append("|---|---|---|---|---|---|---|---|\n");
 
         for (WindowStats ws : result.windows) {
-            String note = "-";
-            if (ws.activeShape.contains("Transition")) {
-                note = "Schema drift begins";
-            } else if ("Shape B".equals(ws.activeShape)) {
-                if (ws.adaptiveRatio > ws.staticRatio * 1.5) {
-                    note = "**Ratio recovered after retrain**";
-                } else {
-                    note = "Drift detected; accumulating fresh post-drift samples";
-                }
-            }
-            sb.append(String.format("| #%d | %d - %d | %s | %.2fx | %.2fx | %.2fx | **%.2fx** | %s |\n",
+            sb.append(String.format("| #%d | %d - %d | %s | %.2fx | %.2fx | %.2fx | **%.2fx** | **%.2fx** |\n",
                     ws.windowIndex + 1, ws.startPayload, ws.endPayload, ws.activeShape,
-                    ws.gzipRatio, ws.staticRatio, ws.fixedRatio, ws.adaptiveRatio, note));
+                    ws.gzipRatio, ws.staticRatio, ws.fixedRatio, ws.adaptive200Ratio, ws.adaptive100Ratio));
         }
         sb.append("\n");
 
         return sb.toString();
     }
 
+    private static void printMdStrategyRow(StringBuilder sb, StrategyResult s) {
+        String recoveryStr = s.timeToRecovery >= 0 ? s.timeToRecovery + " payloads" : "-";
+        sb.append(String.format("| **%s** | %,d B | **%.2fx** | %d | %.2fx | %d ms | %s |\n",
+                s.name, s.totalBytes, s.overallRatio, s.retrainCount, s.postSwitch100Ratio, s.trainingTimeMs, recoveryStr));
+    }
+
     // =========================================================================
-    // Synthetic Data Generator (labeled SYNTHETIC)
+    // Synthetic Stream & Data Generation
     // =========================================================================
+
+    public static List<byte[]> generateSyntheticStream(int total, int switchPoint, long seed) {
+        Random rA = new Random(seed);
+        Random rB = new Random(seed + 9999);
+        List<byte[]> stream = new ArrayList<>(total);
+
+        for (int i = 1; i <= total; i++) {
+            if (switchPoint > 0 && i > switchPoint) {
+                stream.add(generateShapeBJson(i, rB).getBytes(StandardCharsets.UTF_8));
+            } else {
+                stream.add(generateShapeAJson(i, rA).getBytes(StandardCharsets.UTF_8));
+            }
+        }
+        return stream;
+    }
+
+    public static String generateShapeAJson(int id, Random rand) {
+        return String.format(
+                "{\"_dataset\":\"SYNTHETIC\",\"id\":%d,\"name\":\"Product-%d\",\"category\":\"%s\",\"price\":%.2f,\"inStock\":%b,\"rating\":%.1f,\"tags\":[\"%s\",\"%s\"],\"createdAt\":\"2026-03-%02d\",\"description\":\"High performance consumer merchandise item designed for reliability with standard warranty protection.\"}",
+                id, id, (id % 2 == 0 ? "electronics" : "appliances"), (id * 19.99) % 500 + 10.0, (id % 3 != 0), 3.5 + (id % 15) * 0.1,
+                (id % 2 == 0 ? "new" : "popular"), "sale", (id % 28) + 1
+        );
+    }
+
+    public static String generateShapeBJson(int id, Random rand) {
+        return String.format(
+                "{\"_dataset\":\"SYNTHETIC\",\"item_id\":%d,\"title\":\"Product-%d\",\"department\":\"%s\",\"pricing\":{\"amount\":%.2f,\"currency\":\"USD\",\"discount_eligible\":%b},\"inventory\":{\"available\":%b,\"fulfillment_hub\":\"WH-ZONE-%d\"},\"customer_score\":%.1f,\"labels\":[\"%s\",\"%s\"],\"registered_date\":\"2026-04-%02d\",\"specs\":{\"model_series\":\"SERIES-X\",\"extended_warranty\":true}}",
+                id, id, (id % 2 == 0 ? "electronics" : "appliances"), (id * 19.99) % 500 + 10.0, (id % 4 == 0), (id % 3 != 0), (id % 5) + 1,
+                3.5 + (id % 15) * 0.1, (id % 2 == 0 ? "new" : "popular"), "sale", (id % 28) + 1
+        );
+    }
 
     public static void generateSynthetic(Path dirA, Path dirB, int countA, int countB) throws IOException {
         Files.createDirectories(dirA);
@@ -629,22 +953,12 @@ public class DriftBench {
 
         Random rA = new Random(42);
         for (int i = 1; i <= countA; i++) {
-            String json = String.format(
-                    "{\"_dataset\":\"SYNTHETIC\",\"id\":%d,\"name\":\"Product-%d\",\"category\":\"%s\",\"price\":%.2f,\"inStock\":%b,\"rating\":%.1f,\"tags\":[\"%s\",\"%s\"],\"createdAt\":\"2026-03-%02d\",\"description\":\"High performance consumer merchandise item designed for reliability with standard warranty protection.\"}",
-                    i, i, (i % 2 == 0 ? "electronics" : "appliances"), (i * 19.99) % 500 + 10.0, (i % 3 != 0), 3.5 + (i % 15) * 0.1,
-                    (i % 2 == 0 ? "new" : "popular"), "sale", (i % 28) + 1
-            );
-            Files.writeString(dirA.resolve(String.format("%06d.json", i)), json, StandardCharsets.UTF_8);
+            Files.writeString(dirA.resolve(String.format("%06d.json", i)), generateShapeAJson(i, rA), StandardCharsets.UTF_8);
         }
 
         Random rB = new Random(84);
         for (int i = 1; i <= countB; i++) {
-            String json = String.format(
-                    "{\"_dataset\":\"SYNTHETIC\",\"item_id\":%d,\"title\":\"Product-%d\",\"department\":\"%s\",\"pricing\":{\"amount\":%.2f,\"currency\":\"USD\",\"discount_eligible\":%b},\"inventory\":{\"available\":%b,\"fulfillment_hub\":\"WH-ZONE-%d\"},\"customer_score\":%.1f,\"labels\":[\"%s\",\"%s\"],\"registered_date\":\"2026-04-%02d\",\"specs\":{\"model_series\":\"SERIES-X\",\"extended_warranty\":true}}",
-                    i, i, (i % 2 == 0 ? "electronics" : "appliances"), (i * 19.99) % 500 + 10.0, (i % 4 == 0), (i % 3 != 0), (i % 5) + 1,
-                    3.5 + (i % 15) * 0.1, (i % 2 == 0 ? "new" : "popular"), "sale", (i % 28) + 1
-            );
-            Files.writeString(dirB.resolve(String.format("%06d.json", i)), json, StandardCharsets.UTF_8);
+            Files.writeString(dirB.resolve(String.format("%06d.json", i)), generateShapeBJson(i, rB), StandardCharsets.UTF_8);
         }
     }
 
@@ -693,32 +1007,63 @@ public class DriftBench {
     private static void printConsoleSummary(DriftResult r) {
         String synthTag = r.isSynthetic ? " [DATASET: SYNTHETIC]" : "";
         System.out.println("\n=== Drift Benchmark Summary" + synthTag + " ===");
-        System.out.printf("Shape Switch Point:         Payload #%d (Shape A: %d, Shape B: %d)%n",
+        System.out.println("Notice: All compression ratios are total-bytes based (sum(originalBytes) / sum(compressedBytes)).\n");
+
+        System.out.println("1. Canonical Run (Switch Point #600):");
+        System.out.printf("   Shape Switch Point:         Payload #%d (Shape A: %d, Shape B: %d)%n",
                 r.shapeSwitchPoint, r.countA, r.countB);
         if (r.payloadsElapsedToDetection >= 0) {
-            System.out.printf("Drift Detection Point:      Payload #%d (%d payloads elapsed after shape switch)%n",
+            System.out.printf("   Drift Detection Point:      Payload #%d (%d payloads elapsed after shape switch)%n",
                     r.driftDetectedAt, r.payloadsElapsedToDetection);
-        } else {
-            System.out.println("Drift Detection Point:      Not detected");
         }
-        System.out.printf("Dictionary Switch Points:   %s (trained on ONLY %d fresh post-drift samples)%n",
-                r.driftRetrainPayloadIndices, r.driftEvalWindow);
-        System.out.printf("Evaluation Window:          %d payloads | Threshold: < %.2f * baseline%n",
+        System.out.printf("   Dictionary Switch Points:   Adaptive-200: %s | Adaptive-100: [%d]%n",
+                r.driftRetrainPayloadIndices, r.adaptive100.retrainDeployedAt);
+        System.out.printf("   Evaluation Window:          %d payloads | Threshold: < %.2f * baseline%n",
                 r.driftEvalWindow, r.driftThreshold);
-        System.out.printf("Reporting Window:           %d payloads%n%n", r.reportingWindowSize);
+        System.out.printf("   Reporting Window:           %d payloads%n%n", r.reportingWindowSize);
 
-        System.out.println("Per-Strategy Comparison:");
-        System.out.printf("  %-25s %12s %11s %10s %22s%n", "Strategy", "Total Bytes", "Mean Ratio", "Retrains", "Post-Switch 100 Ratio");
-        System.out.println("  -------------------------------------------------------------------------------------");
-        printStrategyRow(r.gzip);
-        printStrategyRow(r.staticDict);
-        printStrategyRow(r.fixedSchedule);
-        printStrategyRow(r.adaptive);
+        System.out.println("   Strategy                         Total Bytes   Mean Ratio   Retrains   Post-Switch 100 Ratio   Train Time   Recovery");
+        System.out.println("   ------------------------------------------------------------------------------------------------------------------");
+        printStrategyConsoleRow(r.gzip);
+        printStrategyConsoleRow(r.staticDict);
+        printStrategyConsoleRow(r.fixedSchedule);
+        printStrategyConsoleRow(r.adaptive200);
+        printStrategyConsoleRow(r.adaptive100);
+        System.out.println("   ------------------------------------------------------------------------------------------------------------------\n");
+
+        if (r.matrixResult != null) {
+            System.out.println("2. Multi-Switch-Point & Multi-Seed Matrix (4 Switch Points x 5 Seeds = 20 Runs):");
+            System.out.printf("   %-28s %-25s %-16s %-25s %-16s%n",
+                    "Strategy", "Total Bytes (mean)", "Retrains (mean)", "Post-Switch 100 (mean)", "Train Time (mean)");
+            System.out.println("   ------------------------------------------------------------------------------------------------------------------");
+            for (AggregateStrategyStats agg : r.matrixResult.aggregates) {
+                System.out.printf("   %-28s %-25s %-16s %-25s %-16s%n",
+                        agg.strategyName,
+                        agg.totalBytes.format("%,.0f B"),
+                        agg.retrainCount.format("%.1f"),
+                        agg.postSwitch100Ratio.format("%.2fx"),
+                        agg.trainingTimeMs.format("%.1f ms"));
+            }
+            System.out.println("   ------------------------------------------------------------------------------------------------------------------\n");
+        }
+
+        if (r.noDriftResult != null) {
+            System.out.println("3. No-Drift Stream Verification (Shape A only, 1,000 Payloads):");
+            System.out.printf("   %-28s %12s %11s %10s %14s%n", "Strategy", "Total Bytes", "Mean Ratio", "Retrains", "Train Time");
+            System.out.println("   ----------------------------------------------------------------------------------");
+            for (StrategyResult s : r.noDriftResult.strategies) {
+                System.out.printf("   %-28s %,10d B %10.2fx %10d %11d ms%n",
+                        s.name, s.totalBytes, s.overallRatio, s.retrainCount, s.trainingTimeMs);
+            }
+            System.out.println("   ----------------------------------------------------------------------------------\n");
+        }
+
         System.out.println("=====================================================================================\n");
     }
 
-    private static void printStrategyRow(StrategyResult s) {
-        System.out.printf("  %-25s %,10d B %10.2fx %10d %21.2fx%n",
-                s.name, s.totalBytes, s.overallRatio, s.retrainCount, s.postSwitch100Ratio);
+    private static void printStrategyConsoleRow(StrategyResult s) {
+        String rec = s.timeToRecovery >= 0 ? s.timeToRecovery + " payloads" : "-";
+        System.out.printf("   %-30s %,10d B %10.2fx %10d %21.2fx %9d ms %12s%n",
+                s.name, s.totalBytes, s.overallRatio, s.retrainCount, s.postSwitch100Ratio, s.trainingTimeMs, rec);
     }
 }

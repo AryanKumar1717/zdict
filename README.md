@@ -150,25 +150,63 @@ The `zdict.responses` counter includes the reason tag for visibility into gating
 
 ---
 
-### 4. Schema Drift Benchmark: 4-Strategy Comparison
+### 4. Schema Drift Benchmark: 5-Strategy Comparison
 
 ![Schema Drift](benchmark-results/drift.svg)
+
+> **Notice**: All benchmark datasets in this section are **SYNTHETIC** (generated payloads labeled `_dataset: "SYNTHETIC"`). Compression ratios are **total-bytes based** ($\sum \text{uncompressed bytes} / \sum \text{compressed bytes}$), not arithmetic averages.
 
 Simulates continuous traffic across 1,000 payloads: first 60% with Schema A (legacy schema), followed by 40% Schema B (renamed fields and nested structures).
 
 - **Shape Switch Point**: Payload **#600**
 - **Drift Detected At**: Payload **#608** (**8 payloads elapsed** after shape switch)
-- **Dictionary Switch Point**: Payload **#808** (retrained on ONLY 200 fresh post-drift payloads)
+- **Dictionary Switch Points**: Adaptive-200: **#808** | Adaptive-100: **#708**
 - **Evaluation Window**: 200 payloads | **Threshold**: `rolling mean < 0.85 * baseline`
+- **Post-Drift Training**: Uses **ONLY** fresh post-drift payloads (buffer reset on detection)
 
-| Strategy | Total Compressed Size | Mean Ratio | Retrain Count | Post-Switch 100 Ratio | Behavioral Note |
+#### Canonical 60/40 Stream Results (1,000 Payloads)
+
+| Strategy | Total Compressed Size | Mean Ratio | Retrain Count | Post-Switch 100 Ratio | Training Time (ms) | Recovery Horizon |
+|---|---|---|---|---|---|---|
+| **gzip (level 6)** | 254,783 B | **1.24x** | 0 | 1.28x | 0 ms | - |
+| **Static zstd+dict** | 135,008 B | **2.34x** | 0 | 1.30x | 78 ms | - |
+| **Fixed-schedule zstd+dict** | 87,705 B | **3.61x** | 4 | 1.27x | 159 ms | 0 payloads |
+| **Adaptive zdict (buffer=200)** | **88,888 B** | **3.56x** | **1** | **1.30x** | 98 ms | 208 payloads |
+| **Adaptive zdict (buffer=100)** | **70,681 B** | **4.48x** | **1** | **1.30x** | 97 ms | 108 payloads |
+
+#### Sensitivity Matrix Across Switch Points & Seeds
+
+Evaluated across 4 switch points (`550, 650, 730, 800`) and 5 random seeds (`42, 101, 2024, 777, 9999`) &mdash; 20 simulation runs per strategy:
+
+| Strategy | Total Compressed Bytes (mean [min - max]) | Retrain Count (mean [min - max]) | Post-Switch 100 Ratio (mean [min - max]) | Training Time ms (mean [min - max]) |
+|---|---|---|---|---|
+| **gzip (level 6)** | 251,573 B [246,800 - 256,953] | 0.0 [0 - 0] | 1.28x [1.28x - 1.28x] | 0.0 ms [0 - 0] |
+| **Static zstd+dict** | 116,050 B [87,546 - 148,122] | 0.0 [0 - 0] | 1.27x [1.26x - 1.27x] | 18.6 ms [16 - 25] |
+| **Fixed-schedule zstd+dict** | 80,320 B [58,217 - 99,788] | 4.0 [4 - 4] | 1.36x [1.26x - 1.66x] | 88.2 ms [82 - 97] |
+| **Adaptive zdict (buffer=200)** | 89,948 B [87,546 - 91,417] | 0.8 [0 - 1] | 1.27x [1.26x - 1.27x] | 31.8 ms [17 - 42] |
+| **Adaptive zdict (buffer=100)** | 70,800 B [68,746 - 73,331] | 1.0 [1 - 1] | 1.27x [1.26x - 1.27x] | 35.3 ms [31 - 46] |
+
+*Note on Adaptive-200 retrain mean (0.8)*: At late switch point 800, only 200 total Shape B payloads exist. Because detection occurs at #808, 200 post-drift payloads cannot accumulate before the 1000-payload stream terminates. Adaptive-100 reliably retrains at #908 across all seeds.
+
+#### No-Drift Stream Verification (Shape A Only, 1,000 Payloads)
+
+| Strategy | Total Compressed Size | Mean Ratio | Retrain Count | Training Time (ms) | Efficiency Verdict |
 |---|---|---|---|---|---|
-| **gzip (level 6)** | 254,783 B | **1.24x** | 0 | 1.28x | Consistent, but low compression for repetitive JSON |
-| **Static zstd+dict** | 135,008 B | **2.34x** | 0 | 1.30x | Excellent on Shape A (~7-9x), collapses to 1.27x on Shape B |
-| **Fixed-schedule zstd+dict** | 87,705 B | **3.61x** | 4 | 1.27x | Retrained every 200 payloads on last 200 without drift detection |
-| **Adaptive zdict** | **88,888 B** | **3.56x** | **1** | **1.30x** | Detects drift at #608, resets buffer, retrains on 200 post-drift payloads at #808 |
+| **gzip (level 6)** | 238,687 B | **1.21x** | **0** | 0 ms | - |
+| **Static zstd+dict** | 39,105 B | **7.40x** | **0** | 17 ms | Optimal for static traffic |
+| **Fixed-schedule zstd+dict** | 38,443 B | **7.53x** | **4** | 84 ms | **Wasteful** (4 blind retrains with zero drift) |
+| **Adaptive zdict (buffer=200)** | 39,105 B | **7.40x** | **0** | 17 ms | **Optimal** (zero false alarms) |
+| **Adaptive zdict (buffer=100)** | 39,105 B | **7.40x** | **0** | 17 ms | **Optimal** (zero false alarms) |
 
-> **Adaptive Efficiency**: Adaptive zdict achieved compression comparable to fixed-schedule retraining (3.56x vs 3.61x, saving 46,120 bytes vs static) while requiring **75% fewer retraining operations** (1 drift-triggered retrain vs 4 blind scheduled retrains).
+#### Adaptive Variant Comparison: Buffer=100 vs Buffer=200
+
+| Metric | Adaptive (buffer=200) | Adaptive (buffer=100) | Tradeoff Analysis |
+|---|---|---|---|
+| **Canonical Total Bytes** | 88,888 B | 70,681 B | **18,207 B saved** by buffer=100 due to earlier recovery |
+| **Time-to-Recovery** | 208 payloads | 108 payloads | **100 payloads faster** recovery for buffer=100 |
+| **Canonical Training Time** | 98 ms | 97 ms | Slightly faster dictionary training on 100 samples |
+| **Switch Point 800 Horizon** | Fails to retrain before stream end | **Recovers at #908** | Buffer=100 safely handles late-stage drift |
+
 
 ---
 
