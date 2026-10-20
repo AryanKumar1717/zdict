@@ -5,3 +5,4 @@ samples/
 *.dict
 zdict-data/
 benchmark-data/
+benchmark-data/real/

@@ -1,46 +1,46 @@
 {
-  "date" : "2026-10-20T06:22:02.0933411Z",
+  "date" : "2026-10-20T10:04:02.4586506Z",
   "javaVersion" : "21.0.10",
   "os" : "Windows 11 amd64",
   "timingNotice" : "Timing is a simple loop after JVM warmup, not JMH.",
   "groups" : [ {
-    "group" : "products_v1",
-    "totalPayloads" : 600,
-    "trainPayloads" : 400,
-    "testPayloads" : 200,
-    "originalBytes" : 57935,
+    "group" : "pokemon",
+    "totalPayloads" : 300,
+    "trainPayloads" : 200,
+    "testPayloads" : 100,
+    "originalBytes" : 23662633,
     "dictionarySizeBytes" : 16384,
     "gzip" : {
       "name" : "gzip (level 6)",
-      "compressedBytes" : 47745,
-      "ratio" : 1.2134254895800607,
-      "savingsPercent" : 17.588676965564854,
-      "p50Micros" : 15.4,
-      "p99Micros" : 47.7
+      "compressedBytes" : 684951,
+      "ratio" : 34.54646098772029,
+      "savingsPercent" : 97.1053474902814,
+      "p50Micros" : 1069.0,
+      "p99Micros" : 1996.3
     },
     "zstd" : {
       "name" : "zstd (level 3)",
-      "compressedBytes" : 47573,
-      "ratio" : 1.2178126248081895,
-      "savingsPercent" : 17.885561405022866,
-      "p50Micros" : 6.9,
-      "p99Micros" : 11.4
+      "compressedBytes" : 722837,
+      "ratio" : 32.73577998912618,
+      "savingsPercent" : 96.94523851170746,
+      "p50Micros" : 258.1,
+      "p99Micros" : 503.0
     },
     "zstdDict" : {
       "name" : "zstd+dict (level 3)",
-      "compressedBytes" : 7762,
-      "ratio" : 7.463926822983767,
-      "savingsPercent" : 86.60222663329593,
-      "p50Micros" : 3.2,
-      "p99Micros" : 6.3
+      "compressedBytes" : 693610,
+      "ratio" : 34.1151843254855,
+      "savingsPercent" : 97.06875392945493,
+      "p50Micros" : 282.1,
+      "p99Micros" : 724.7
     },
     "buckets" : [ {
       "bucketName" : "<1KB",
-      "count" : 200,
-      "originalBytes" : 57935,
-      "gzipRatio" : 1.2134254895800607,
-      "zstdRatio" : 1.2178126248081895,
-      "zstdDictRatio" : 7.463926822983767
+      "count" : 0,
+      "originalBytes" : 0,
+      "gzipRatio" : 0.0,
+      "zstdRatio" : 0.0,
+      "zstdDictRatio" : 0.0
     }, {
       "bucketName" : "1-4KB",
       "count" : 0,
@@ -50,52 +50,52 @@
       "zstdDictRatio" : 0.0
     }, {
       "bucketName" : ">4KB",
-      "count" : 0,
-      "originalBytes" : 0,
-      "gzipRatio" : 0.0,
-      "zstdRatio" : 0.0,
-      "zstdDictRatio" : 0.0
+      "count" : 100,
+      "originalBytes" : 23662633,
+      "gzipRatio" : 34.54646098772029,
+      "zstdRatio" : 32.73577998912618,
+      "zstdDictRatio" : 34.1151843254855
     } ],
-    "avgBytesSavedVsGzip" : 199.915,
-    "breakEvenPayloads" : 82
+    "avgBytesSavedVsGzip" : 0.0,
+    "breakEvenPayloads" : null
   }, {
-    "group" : "products_v2",
-    "totalPayloads" : 400,
-    "trainPayloads" : 266,
-    "testPayloads" : 134,
-    "originalBytes" : 47896,
+    "group" : "species",
+    "totalPayloads" : 300,
+    "trainPayloads" : 200,
+    "testPayloads" : 100,
+    "originalBytes" : 2697404,
     "dictionarySizeBytes" : 16384,
     "gzip" : {
       "name" : "gzip (level 6)",
-      "compressedBytes" : 37433,
-      "ratio" : 1.279512729409879,
-      "savingsPercent" : 21.8452480374144,
-      "p50Micros" : 17.5,
-      "p99Micros" : 27.2
+      "compressedBytes" : 541420,
+      "ratio" : 4.982091537069189,
+      "savingsPercent" : 79.92810865558144,
+      "p50Micros" : 260.7,
+      "p99Micros" : 480.3
     },
     "zstd" : {
       "name" : "zstd (level 3)",
-      "compressedBytes" : 38532,
-      "ratio" : 1.243018789577494,
-      "savingsPercent" : 19.55069316853182,
-      "p50Micros" : 7.6,
-      "p99Micros" : 12.2
+      "compressedBytes" : 571981,
+      "ratio" : 4.715897905699665,
+      "savingsPercent" : 78.79513042910887,
+      "p50Micros" : 82.3,
+      "p99Micros" : 264.2
     },
     "zstdDict" : {
       "name" : "zstd+dict (level 3)",
-      "compressedBytes" : 5549,
-      "ratio" : 8.631465128852046,
-      "savingsPercent" : 88.41448137631535,
-      "p50Micros" : 3.2,
-      "p99Micros" : 8.4
+      "compressedBytes" : 486728,
+      "ratio" : 5.541912526092602,
+      "savingsPercent" : 81.95568776497699,
+      "p50Micros" : 93.6,
+      "p99Micros" : 433.4
     },
     "buckets" : [ {
       "bucketName" : "<1KB",
-      "count" : 134,
-      "originalBytes" : 47896,
-      "gzipRatio" : 1.279512729409879,
-      "zstdRatio" : 1.243018789577494,
-      "zstdDictRatio" : 8.631465128852046
+      "count" : 0,
+      "originalBytes" : 0,
+      "gzipRatio" : 0.0,
+      "zstdRatio" : 0.0,
+      "zstdDictRatio" : 0.0
     }, {
       "bucketName" : "1-4KB",
       "count" : 0,
@@ -105,48 +105,48 @@
       "zstdDictRatio" : 0.0
     }, {
       "bucketName" : ">4KB",
-      "count" : 0,
-      "originalBytes" : 0,
-      "gzipRatio" : 0.0,
-      "zstdRatio" : 0.0,
-      "zstdDictRatio" : 0.0
+      "count" : 100,
+      "originalBytes" : 2697404,
+      "gzipRatio" : 4.982091537069189,
+      "zstdRatio" : 4.715897905699665,
+      "zstdDictRatio" : 5.541912526092602
     } ],
-    "avgBytesSavedVsGzip" : 237.9402985074627,
-    "breakEvenPayloads" : 69
+    "avgBytesSavedVsGzip" : 546.92,
+    "breakEvenPayloads" : 30
   } ],
   "overall" : {
     "group" : "ALL_GROUPS_TOTAL",
-    "totalPayloads" : 1000,
-    "trainPayloads" : 666,
-    "testPayloads" : 334,
-    "originalBytes" : 105831,
+    "totalPayloads" : 600,
+    "trainPayloads" : 400,
+    "testPayloads" : 200,
+    "originalBytes" : 26360037,
     "dictionarySizeBytes" : 32768,
     "gzip" : {
       "name" : "gzip (level 6)",
-      "compressedBytes" : 85178,
-      "ratio" : 1.2424687125783653,
-      "savingsPercent" : 19.515075922933732,
-      "p50Micros" : 16.45,
-      "p99Micros" : 37.45
+      "compressedBytes" : 1226371,
+      "ratio" : 21.494341435014363,
+      "savingsPercent" : 95.3476127518334,
+      "p50Micros" : 664.85,
+      "p99Micros" : 1238.3
     },
     "zstd" : {
       "name" : "zstd (level 3)",
-      "compressedBytes" : 86105,
-      "ratio" : 1.2290923872016724,
-      "savingsPercent" : 18.63915109939431,
-      "p50Micros" : 7.25,
-      "p99Micros" : 11.8
+      "compressedBytes" : 1294818,
+      "ratio" : 20.358102065309566,
+      "savingsPercent" : 95.08795074908278,
+      "p50Micros" : 170.20000000000002,
+      "p99Micros" : 383.6
     },
     "zstdDict" : {
       "name" : "zstd+dict (level 3)",
-      "compressedBytes" : 13311,
-      "ratio" : 7.950642325895876,
-      "savingsPercent" : 87.422399863934,
-      "p50Micros" : 3.2,
-      "p99Micros" : 7.3500000000000005
+      "compressedBytes" : 1180338,
+      "ratio" : 22.332617436700335,
+      "savingsPercent" : 95.52224452492233,
+      "p50Micros" : 187.85000000000002,
+      "p99Micros" : 579.05
     },
     "buckets" : [ ],
-    "avgBytesSavedVsGzip" : 215.17065868263472,
-    "breakEvenPayloads" : 153
+    "avgBytesSavedVsGzip" : 230.165,
+    "breakEvenPayloads" : 143
   }
 }
