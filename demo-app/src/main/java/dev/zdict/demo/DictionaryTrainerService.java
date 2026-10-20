@@ -7,8 +7,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.zip.GZIPOutputStream;
 
 /**
  * Trains endpoint-group dictionaries from accumulated samples, measures compression
@@ -20,10 +24,47 @@ public class DictionaryTrainerService {
     private static final Logger log = LoggerFactory.getLogger(DictionaryTrainerService.class);
     private static final int COMPRESSION_LEVEL = 3;
 
+    public static class NotWorthItInfo {
+        private final String group;
+        private final String candidateId;
+        private final double gainVsZstd;
+        private final double gainVsGzip;
+        private final double minGain;
+
+        public NotWorthItInfo(String group, String candidateId, double gainVsZstd, double gainVsGzip, double minGain) {
+            this.group = group;
+            this.candidateId = candidateId;
+            this.gainVsZstd = gainVsZstd;
+            this.gainVsGzip = gainVsGzip;
+            this.minGain = minGain;
+        }
+
+        public String getGroup() {
+            return group;
+        }
+
+        public String getCandidateId() {
+            return candidateId;
+        }
+
+        public double getGainVsZstd() {
+            return gainVsZstd;
+        }
+
+        public double getGainVsGzip() {
+            return gainVsGzip;
+        }
+
+        public double getMinGain() {
+            return minGain;
+        }
+    }
+
     private final SampleStore sampleStore;
     private final DictionaryRegistry registry;
     private final ZdictProperties props;
     private final EventLog eventLog;
+    private final ConcurrentHashMap<String, NotWorthItInfo> notWorthItGroups = new ConcurrentHashMap<>();
 
     public DictionaryTrainerService(SampleStore sampleStore, DictionaryRegistry registry, ZdictProperties props) {
         this(sampleStore, registry, props, null);
@@ -36,6 +77,18 @@ public class DictionaryTrainerService {
         this.registry = registry;
         this.props = props;
         this.eventLog = eventLog;
+    }
+
+    public NotWorthItInfo getNotWorthIt(String group) {
+        return notWorthItGroups.get(group);
+    }
+
+    public boolean isNotWorthIt(String group) {
+        return notWorthItGroups.containsKey(group);
+    }
+
+    public Set<String> getNotWorthItGroups() {
+        return notWorthItGroups.keySet();
     }
 
     public TrainResult train(String group) throws IOException {
@@ -80,6 +133,7 @@ public class DictionaryTrainerService {
         long origHoldoutBytes = 0;
         long candidateCompBytes = 0;
         long plainCompBytes = 0;
+        long gzipCompBytes = 0;
         long activeCompBytes = 0;
 
         try {
@@ -87,6 +141,9 @@ public class DictionaryTrainerService {
                 origHoldoutBytes += sample.length;
                 byte[] plainComp = Zstd.compress(sample, COMPRESSION_LEVEL);
                 plainCompBytes += plainComp.length;
+
+                byte[] gzComp = compressGzip(sample, 6);
+                gzipCompBytes += gzComp.length;
 
                 byte[] candidateComp = Zstd.compress(sample, candidateCompress);
                 candidateCompBytes += candidateComp.length;
@@ -100,10 +157,15 @@ public class DictionaryTrainerService {
             candidateCompress.close();
         }
 
-        double plainRatio = (double) plainCompBytes / origHoldoutBytes;
-        double candidateRatio = (double) candidateCompBytes / origHoldoutBytes;
-        Double activeRatio = (activeVersion != null) ? (double) activeCompBytes / origHoldoutBytes : null;
+        double plainRatio = origHoldoutBytes > 0 ? (double) plainCompBytes / origHoldoutBytes : 1.0;
+        double gzipRatio = origHoldoutBytes > 0 ? (double) gzipCompBytes / origHoldoutBytes : 1.0;
+        double candidateRatio = origHoldoutBytes > 0 ? (double) candidateCompBytes / origHoldoutBytes : 1.0;
+        Double activeRatio = (activeVersion != null && origHoldoutBytes > 0) ? (double) activeCompBytes / origHoldoutBytes : null;
         double baselineRatio = candidateCompBytes > 0 ? (double) origHoldoutBytes / candidateCompBytes : 1.0;
+
+        double gainVsZstd = plainCompBytes > 0 ? (double) (plainCompBytes - candidateCompBytes) / plainCompBytes : 0.0;
+        double gainVsGzip = gzipCompBytes > 0 ? (double) (gzipCompBytes - candidateCompBytes) / gzipCompBytes : 0.0;
+        double minGain = (props != null && props.getTrain() != null) ? props.getTrain().getMinGain() : 0.10;
 
         TrainResult result = new TrainResult();
         result.setGroup(group);
@@ -112,8 +174,30 @@ public class DictionaryTrainerService {
         result.setTrainCount(trainCount);
         result.setHoldoutCount(holdoutCount);
         result.setPlainHoldoutRatio(plainRatio);
+        result.setGzipHoldoutRatio(gzipRatio);
         result.setActiveHoldoutRatio(activeRatio);
         result.setNewHoldoutRatio(candidateRatio);
+        result.setGainVsZstd(gainVsZstd);
+        result.setGainVsGzip(gainVsGzip);
+        result.setMinGain(minGain);
+
+        // Worth-It Gate: new dictionary must beat both gzip and plain zstd by at least zdict.train.min-gain
+        if (gainVsZstd < minGain || gainVsGzip < minGain) {
+            notWorthItGroups.put(group, new NotWorthItInfo(group, candidateId, gainVsZstd, gainVsGzip, minGain));
+            result.setPromoted(false);
+            result.setDecision("NOT_WORTH_IT");
+            result.setReason(String.format("Candidate dictionary failed worth-it gate: gain vs plain zstd = %.2f%%, gain vs gzip = %.2f%% (>= %.2f%% required)",
+                    gainVsZstd * 100, gainVsGzip * 100, minGain * 100));
+            if (eventLog != null) {
+                eventLog.record("NOT_WORTH_IT", group, candidateId, result.getReason());
+            }
+            log.info("Candidate dictionary {} for group '{}' failed worth-it gate: gain vs zstd = {:.2f}%, gain vs gzip = {:.2f}%, min-gain = {:.2f}%. Group status set to NOT_WORTH_IT.",
+                    candidateId, group, gainVsZstd * 100, gainVsGzip * 100, minGain * 100);
+            return result;
+        }
+
+        // Passed worth-it gate; clear any previous NOT_WORTH_IT status for this group
+        notWorthItGroups.remove(group);
 
         if (activeVersion == null) {
             // First dictionary: automatically promote
@@ -150,5 +234,17 @@ public class DictionaryTrainerService {
         }
 
         return result;
+    }
+
+    private static byte[] compressGzip(byte[] input, int level) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzip = new GZIPOutputStream(baos) {
+            {
+                def.setLevel(level);
+            }
+        }) {
+            gzip.write(input);
+        }
+        return baos.toByteArray();
     }
 }

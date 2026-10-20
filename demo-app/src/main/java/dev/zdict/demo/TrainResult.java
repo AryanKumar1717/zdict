@@ -18,6 +18,10 @@ public class TrainResult {
     private double plainHoldoutRatio;
     private Double activeHoldoutRatio;
     private double newHoldoutRatio;
+    private Double gzipHoldoutRatio;
+    private Double gainVsZstd;
+    private Double gainVsGzip;
+    private Double minGain;
     private String reason;
 
     public TrainResult() {
@@ -119,5 +123,37 @@ public class TrainResult {
 
     public void setReason(String reason) {
         this.reason = reason;
+    }
+
+    public Double getGzipHoldoutRatio() {
+        return gzipHoldoutRatio;
+    }
+
+    public void setGzipHoldoutRatio(Double gzipHoldoutRatio) {
+        this.gzipHoldoutRatio = gzipHoldoutRatio;
+    }
+
+    public Double getGainVsZstd() {
+        return gainVsZstd;
+    }
+
+    public void setGainVsZstd(Double gainVsZstd) {
+        this.gainVsZstd = gainVsZstd;
+    }
+
+    public Double getGainVsGzip() {
+        return gainVsGzip;
+    }
+
+    public void setGainVsGzip(Double gainVsGzip) {
+        this.gainVsGzip = gainVsGzip;
+    }
+
+    public Double getMinGain() {
+        return minGain;
+    }
+
+    public void setMinGain(Double minGain) {
+        this.minGain = minGain;
     }
 }

@@ -71,6 +71,7 @@ public class ZdictProperties {
         private int minSamples = 200;
         private int dictSize = 16 * 1024; // 16 KB
         private java.time.Duration cooldown = java.time.Duration.ofMinutes(15);
+        private double minGain = 0.10;
 
         public int getMinSamples() {
             return minSamples;
@@ -94,6 +95,14 @@ public class ZdictProperties {
 
         public void setCooldown(java.time.Duration cooldown) {
             this.cooldown = cooldown;
+        }
+
+        public double getMinGain() {
+            return minGain;
+        }
+
+        public void setMinGain(double minGain) {
+            this.minGain = minGain;
         }
     }
 

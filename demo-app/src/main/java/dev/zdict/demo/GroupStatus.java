@@ -13,7 +13,10 @@ public class GroupStatus {
     private String canaryId;
     private Double baselineRatio;
     private Double rollingRatio;
-    private String status; // HEALTHY | DRIFTING | CANARY | NO_DICTIONARY
+    private String status; // HEALTHY | DRIFTING | CANARY | NO_DICTIONARY | NOT_WORTH_IT
+    private Double gainVsZstd;
+    private Double gainVsGzip;
+    private Double minGain;
     private int sampleCount;
     private String lastTrainedTime;
     private ZdictEvent lastEvent;
@@ -141,5 +144,29 @@ public class GroupStatus {
 
     public void setCompressedResponses(long compressedResponses) {
         this.compressedResponses = compressedResponses;
+    }
+
+    public Double getGainVsZstd() {
+        return gainVsZstd;
+    }
+
+    public void setGainVsZstd(Double gainVsZstd) {
+        this.gainVsZstd = gainVsZstd;
+    }
+
+    public Double getGainVsGzip() {
+        return gainVsGzip;
+    }
+
+    public void setGainVsGzip(Double gainVsGzip) {
+        this.gainVsGzip = gainVsGzip;
+    }
+
+    public Double getMinGain() {
+        return minGain;
+    }
+
+    public void setMinGain(Double minGain) {
+        this.minGain = minGain;
     }
 }

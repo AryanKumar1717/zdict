@@ -63,6 +63,9 @@ public class ZdictTrainController {
         if (props != null && props.getPaths() != null) {
             groups.addAll(props.getPaths());
         }
+        if (trainerService != null) {
+            groups.addAll(trainerService.getNotWorthItGroups());
+        }
 
         List<GroupStatus> list = new ArrayList<>();
         for (String group : groups) {
@@ -82,7 +85,10 @@ public class ZdictTrainController {
             ZdictEvent lastEvent = eventLog != null ? eventLog.getLastEvent(group) : null;
 
             String status;
-            if (active == null) {
+            DictionaryTrainerService.NotWorthItInfo notWorthIt = trainerService != null ? trainerService.getNotWorthIt(group) : null;
+            if (notWorthIt != null) {
+                status = "NOT_WORTH_IT";
+            } else if (active == null) {
                 status = "NO_DICTIONARY";
             } else if (canary != null) {
                 status = "CANARY";
@@ -93,6 +99,11 @@ public class ZdictTrainController {
             }
 
             GroupStatus gs = new GroupStatus(group, activeId, canaryId, baselineRatio, rollingRatio, status, sampleCount, lastTrainedTime, lastEvent);
+            if (notWorthIt != null) {
+                gs.setGainVsZstd(notWorthIt.getGainVsZstd());
+                gs.setGainVsGzip(notWorthIt.getGainVsGzip());
+                gs.setMinGain(notWorthIt.getMinGain());
+            }
             if (ratioTracker != null) {
                 gs.setBytesOriginal(ratioTracker.getTotalBytesOriginal(group));
                 gs.setBytesCompressed(ratioTracker.getTotalBytesCompressed(group));

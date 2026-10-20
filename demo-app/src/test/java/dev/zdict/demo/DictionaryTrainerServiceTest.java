@@ -104,4 +104,62 @@ class DictionaryTrainerServiceTest {
         assertThat(thirdTrain.getDecision()).isEqualTo("CANARY_STARTED");
         assertThat(registry.getCanary(group).getId()).isEqualTo(thirdTrain.getDictionaryId());
     }
+
+    @Test
+    void dictionaryTrainedOnSmallRepetitivePayloadsIsAccepted() throws Exception {
+        String group = "/api/repetitive";
+        generateSamples(group, 80);
+
+        TrainResult result = trainerService.train(group);
+        assertThat(result.isPromoted()).isTrue();
+        assertThat(result.getDecision()).isEqualTo("PROMOTED_FIRST_ACTIVE");
+        assertThat(result.getGainVsZstd()).isGreaterThanOrEqualTo(0.10);
+        assertThat(result.getGainVsGzip()).isGreaterThanOrEqualTo(0.10);
+        assertThat(trainerService.isNotWorthIt(group)).isFalse();
+
+        DictionaryVersion active = registry.getActive(group);
+        assertThat(active).isNotNull();
+        assertThat(active.getId()).isEqualTo(result.getDictionaryId());
+    }
+
+    @Test
+    void dictionaryTrainedOnLargeVariedPayloadsIsRejected() throws Exception {
+        String group = "/api/large-varied";
+        Random rng = new Random(999);
+
+        // Generate 60 large, varied payloads with random data
+        for (int i = 0; i < 60; i++) {
+            StringBuilder sb = new StringBuilder(15000);
+            sb.append("{\"id\":\"").append(java.util.UUID.randomUUID()).append("\",\"records\":[");
+            for (int j = 0; j < 100; j++) {
+                if (j > 0) sb.append(",");
+                sb.append("{\"key\":\"").append(java.util.UUID.randomUUID())
+                  .append("\",\"val\":\"").append(Long.toHexString(rng.nextLong()))
+                  .append(Long.toHexString(rng.nextLong()))
+                  .append("\"}");
+            }
+            sb.append("]}");
+            sampleStore.offer(group, sb.toString().getBytes(StandardCharsets.UTF_8));
+        }
+
+        TrainResult result = trainerService.train(group);
+        assertThat(result.isPromoted()).isFalse();
+        assertThat(result.getDecision()).isEqualTo("NOT_WORTH_IT");
+        assertThat(result.getReason()).contains("failed worth-it gate");
+        assertThat(result.getGainVsZstd()).isLessThan(0.10);
+        assertThat(trainerService.isNotWorthIt(group)).isTrue();
+        assertThat(registry.getActive(group)).isNull();
+        assertThat(registry.getCanary(group)).isNull();
+
+        // Verify status is exposed as NOT_WORTH_IT in /actuator/zdict/groups
+        ZdictTrainController controller = new ZdictTrainController(trainerService, registry, null, sampleStore, null, null, props);
+        java.util.List<GroupStatus> list = controller.getGroups().getBody();
+        assertThat(list).isNotNull();
+        GroupStatus status = list.stream().filter(g -> g.getGroup().equals(group)).findFirst().orElse(null);
+        assertThat(status).isNotNull();
+        assertThat(status.getStatus()).isEqualTo("NOT_WORTH_IT");
+        assertThat(status.getGainVsZstd()).isNotNull();
+        assertThat(status.getGainVsGzip()).isNotNull();
+        assertThat(status.getMinGain()).isEqualTo(0.10);
+    }
 }
