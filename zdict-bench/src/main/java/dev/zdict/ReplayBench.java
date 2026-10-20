@@ -125,6 +125,14 @@ public class ReplayBench {
         try (Stream<Path> stream = Files.list(samplesDir)) {
             groupDirs = stream.filter(Files::isDirectory).sorted().toList();
         }
+        if (groupDirs.isEmpty()) {
+            try (Stream<Path> stream = Files.list(samplesDir)) {
+                boolean hasJson = stream.anyMatch(p -> p.getFileName().toString().endsWith(".json"));
+                if (hasJson) {
+                    groupDirs = List.of(samplesDir);
+                }
+            }
+        }
 
         for (Path gDir : groupDirs) {
             String groupName = gDir.getFileName().toString();

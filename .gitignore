@@ -4,3 +4,4 @@ target/
 samples/
 *.dict
 zdict-data/
+benchmark-data/
