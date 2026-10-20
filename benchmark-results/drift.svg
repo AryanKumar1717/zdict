@@ -2,7 +2,7 @@
   <rect width="100%" height="100%" fill="#ffffff" rx="8"/>
   <rect width="100%" height="100%" fill="none" stroke="#e2e8f0" stroke-width="1" rx="8"/>
   <text x="30" y="32" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="bold" fill="#1a202c">[SYNTHETIC] API Schema Drift: 6-Strategy Comparison</text>
-  <text x="30" y="54" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#718096">Total-bytes based ratios | Switch: #600 | Drift detected: #608 (8 elapsed) | Threshold: &lt; 0.85 * baseline</text>
+  <text x="30" y="54" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#718096">Total-bytes based ratios | Switch: #600 | Drift detected: #640 (40 elapsed) | Threshold: &lt; 0.85 * baseline</text>
   <line x1="30" y1="86" x2="46" y2="86" stroke="#718096" stroke-width="2.5"/>
   <circle cx="38" cy="86" r="3.5" fill="#718096"/>
   <text x="52" y="90" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">gzip (lvl 6)</text>
@@ -24,15 +24,15 @@
   <line x1="70" y1="435" x2="940" y2="435" stroke="#edf2f7" stroke-width="1"/>
   <text x="60" y="439" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">0.0x</text>
   <line x1="70" y1="371" x2="940" y2="371" stroke="#edf2f7" stroke-width="1"/>
-  <text x="60" y="375" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">2.2x</text>
+  <text x="60" y="375" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">1.8x</text>
   <line x1="70" y1="307" x2="940" y2="307" stroke="#edf2f7" stroke-width="1"/>
-  <text x="60" y="311" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">4.4x</text>
+  <text x="60" y="311" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">3.6x</text>
   <line x1="70" y1="243" x2="940" y2="243" stroke="#edf2f7" stroke-width="1"/>
-  <text x="60" y="247" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">6.6x</text>
+  <text x="60" y="247" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">5.4x</text>
   <line x1="70" y1="179" x2="940" y2="179" stroke="#edf2f7" stroke-width="1"/>
-  <text x="60" y="183" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">8.8x</text>
+  <text x="60" y="183" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">7.2x</text>
   <line x1="70" y1="115" x2="940" y2="115" stroke="#edf2f7" stroke-width="1"/>
-  <text x="60" y="119" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">11.0x</text>
+  <text x="60" y="119" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">9.0x</text>
   <line x1="592" y1="115" x2="592" y2="435" stroke="#e53e3e" stroke-width="2" stroke-dasharray="4,4"/>
   <text x="592" y="107" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#e53e3e" text-anchor="middle">Shape Switch (#600)</text>
   <line x1="70" y1="435" x2="70" y2="440" stroke="#cbd5e0" stroke-width="1"/>
@@ -55,71 +55,71 @@
   <text x="843" y="455" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">900</text>
   <line x1="940" y1="435" x2="940" y2="440" stroke="#cbd5e0" stroke-width="1"/>
   <text x="940" y="455" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">1000</text>
-  <polyline fill="none" stroke="#718096" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" points="70,400 166,400 263,400 360,400 456,400 553,400 650,398 746,398 843,398 940,398"/>
-  <polyline fill="none" stroke="#e53e3e" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" points="70,172 166,221 263,229 360,219 456,229 553,229 650,398 746,399 843,399 940,399"/>
-  <polyline fill="none" stroke="#3182ce" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" points="70,172 166,221 263,229 360,219 456,224 553,215 650,399 746,399 843,190 940,183"/>
-  <polyline fill="none" stroke="#00a3c4" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" points="70,263 166,274 263,281 360,281 456,282 553,280 650,398 746,264 843,264 940,271"/>
-  <polyline fill="none" stroke="#38a169" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" points="70,172 166,221 263,229 360,219 456,229 553,229 650,398 746,399 843,265 940,182"/>
-  <polyline fill="none" stroke="#805ad5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points="70,172 166,221 263,229 360,219 456,229 553,229 650,398 746,302 843,267 940,267"/>
-  <circle cx="70" cy="400" r="3" fill="#718096"/>
-  <circle cx="166" cy="400" r="3" fill="#718096"/>
-  <circle cx="263" cy="400" r="3" fill="#718096"/>
-  <circle cx="360" cy="400" r="3" fill="#718096"/>
-  <circle cx="456" cy="400" r="3" fill="#718096"/>
-  <circle cx="553" cy="400" r="3" fill="#718096"/>
-  <circle cx="650" cy="398" r="3" fill="#718096"/>
-  <circle cx="746" cy="398" r="3" fill="#718096"/>
-  <circle cx="843" cy="398" r="3" fill="#718096"/>
-  <circle cx="940" cy="398" r="3" fill="#718096"/>
-  <rect x="68" y="170" width="5" height="5" fill="#e53e3e"/>
-  <rect x="164" y="219" width="5" height="5" fill="#e53e3e"/>
-  <rect x="261" y="227" width="5" height="5" fill="#e53e3e"/>
-  <rect x="358" y="217" width="5" height="5" fill="#e53e3e"/>
-  <rect x="454" y="227" width="5" height="5" fill="#e53e3e"/>
-  <rect x="551" y="227" width="5" height="5" fill="#e53e3e"/>
-  <rect x="648" y="396" width="5" height="5" fill="#e53e3e"/>
-  <rect x="744" y="397" width="5" height="5" fill="#e53e3e"/>
-  <rect x="841" y="397" width="5" height="5" fill="#e53e3e"/>
-  <rect x="938" y="397" width="5" height="5" fill="#e53e3e"/>
-  <circle cx="70" cy="172" r="3.5" fill="#3182ce"/>
-  <circle cx="166" cy="221" r="3.5" fill="#3182ce"/>
-  <circle cx="263" cy="229" r="3.5" fill="#3182ce"/>
-  <circle cx="360" cy="219" r="3.5" fill="#3182ce"/>
-  <circle cx="456" cy="224" r="3.5" fill="#3182ce"/>
-  <circle cx="553" cy="215" r="3.5" fill="#3182ce"/>
-  <circle cx="650" cy="399" r="3.5" fill="#3182ce"/>
-  <circle cx="746" cy="399" r="3.5" fill="#3182ce"/>
-  <circle cx="843" cy="190" r="3.5" fill="#3182ce"/>
-  <circle cx="940" cy="183" r="3.5" fill="#3182ce"/>
-  <polygon points="70,259 67,266 73,266" fill="#00a3c4"/>
-  <polygon points="166,270 163,277 169,277" fill="#00a3c4"/>
-  <polygon points="263,277 260,284 266,284" fill="#00a3c4"/>
-  <polygon points="360,277 357,284 363,284" fill="#00a3c4"/>
-  <polygon points="456,278 453,285 459,285" fill="#00a3c4"/>
-  <polygon points="553,276 550,283 556,283" fill="#00a3c4"/>
-  <polygon points="650,394 647,401 653,401" fill="#00a3c4"/>
-  <polygon points="746,260 743,267 749,267" fill="#00a3c4"/>
-  <polygon points="843,260 840,267 846,267" fill="#00a3c4"/>
-  <polygon points="940,267 937,274 943,274" fill="#00a3c4"/>
-  <circle cx="70" cy="172" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="166" cy="221" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="263" cy="229" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="360" cy="219" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="456" cy="229" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="553" cy="229" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="650" cy="398" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="746" cy="399" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="843" cy="265" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <circle cx="940" cy="182" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
-  <rect x="67" y="169" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="163" y="218" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="260" y="226" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="357" y="216" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="453" y="226" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="550" y="226" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="647" y="395" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="743" y="299" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="840" y="264" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
-  <rect x="937" y="264" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <polyline fill="none" stroke="#718096" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" points="70,392 166,391 263,391 360,391 456,391 553,391 650,390 746,390 843,390 940,390"/>
+  <polyline fill="none" stroke="#e53e3e" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" points="70,186 166,252 263,260 360,260 456,258 553,259 650,388 746,388 843,389 940,389"/>
+  <polyline fill="none" stroke="#3182ce" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" points="70,186 166,252 263,258 360,260 456,256 553,256 650,389 746,389 843,234 940,233"/>
+  <polyline fill="none" stroke="#00a3c4" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" points="70,243 166,282 263,292 360,287 456,289 553,284 650,389 746,273 843,273 940,270"/>
+  <polyline fill="none" stroke="#38a169" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" points="70,186 166,252 263,260 360,260 456,258 553,259 650,388 746,388 843,349 940,237"/>
+  <polyline fill="none" stroke="#805ad5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points="70,186 166,252 263,260 360,260 456,258 553,259 650,388 746,354 843,275 940,275"/>
+  <circle cx="70" cy="392" r="3" fill="#718096"/>
+  <circle cx="166" cy="391" r="3" fill="#718096"/>
+  <circle cx="263" cy="391" r="3" fill="#718096"/>
+  <circle cx="360" cy="391" r="3" fill="#718096"/>
+  <circle cx="456" cy="391" r="3" fill="#718096"/>
+  <circle cx="553" cy="391" r="3" fill="#718096"/>
+  <circle cx="650" cy="390" r="3" fill="#718096"/>
+  <circle cx="746" cy="390" r="3" fill="#718096"/>
+  <circle cx="843" cy="390" r="3" fill="#718096"/>
+  <circle cx="940" cy="390" r="3" fill="#718096"/>
+  <rect x="68" y="184" width="5" height="5" fill="#e53e3e"/>
+  <rect x="164" y="250" width="5" height="5" fill="#e53e3e"/>
+  <rect x="261" y="258" width="5" height="5" fill="#e53e3e"/>
+  <rect x="358" y="258" width="5" height="5" fill="#e53e3e"/>
+  <rect x="454" y="256" width="5" height="5" fill="#e53e3e"/>
+  <rect x="551" y="257" width="5" height="5" fill="#e53e3e"/>
+  <rect x="648" y="386" width="5" height="5" fill="#e53e3e"/>
+  <rect x="744" y="386" width="5" height="5" fill="#e53e3e"/>
+  <rect x="841" y="387" width="5" height="5" fill="#e53e3e"/>
+  <rect x="938" y="387" width="5" height="5" fill="#e53e3e"/>
+  <circle cx="70" cy="186" r="3.5" fill="#3182ce"/>
+  <circle cx="166" cy="252" r="3.5" fill="#3182ce"/>
+  <circle cx="263" cy="258" r="3.5" fill="#3182ce"/>
+  <circle cx="360" cy="260" r="3.5" fill="#3182ce"/>
+  <circle cx="456" cy="256" r="3.5" fill="#3182ce"/>
+  <circle cx="553" cy="256" r="3.5" fill="#3182ce"/>
+  <circle cx="650" cy="389" r="3.5" fill="#3182ce"/>
+  <circle cx="746" cy="389" r="3.5" fill="#3182ce"/>
+  <circle cx="843" cy="234" r="3.5" fill="#3182ce"/>
+  <circle cx="940" cy="233" r="3.5" fill="#3182ce"/>
+  <polygon points="70,239 67,246 73,246" fill="#00a3c4"/>
+  <polygon points="166,278 163,285 169,285" fill="#00a3c4"/>
+  <polygon points="263,288 260,295 266,295" fill="#00a3c4"/>
+  <polygon points="360,283 357,290 363,290" fill="#00a3c4"/>
+  <polygon points="456,285 453,292 459,292" fill="#00a3c4"/>
+  <polygon points="553,280 550,287 556,287" fill="#00a3c4"/>
+  <polygon points="650,385 647,392 653,392" fill="#00a3c4"/>
+  <polygon points="746,269 743,276 749,276" fill="#00a3c4"/>
+  <polygon points="843,269 840,276 846,276" fill="#00a3c4"/>
+  <polygon points="940,266 937,273 943,273" fill="#00a3c4"/>
+  <circle cx="70" cy="186" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="166" cy="252" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="263" cy="260" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="360" cy="260" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="456" cy="258" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="553" cy="259" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="650" cy="388" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="746" cy="388" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="843" cy="349" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="940" cy="237" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <rect x="67" y="183" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="163" y="249" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="260" y="257" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="357" y="257" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="453" y="255" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="550" y="256" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="647" y="385" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="743" y="351" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="840" y="272" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
+  <rect x="937" y="272" width="6" height="6" fill="#805ad5" stroke="#ffffff" stroke-width="1"/>
   <text x="505" y="477" font-family="system-ui, sans-serif" font-size="12" fill="#718096" text-anchor="middle">Payload Sequence (100 per window)</text>
 </svg>

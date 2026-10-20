@@ -27,8 +27,9 @@ import java.util.stream.Stream;
  *
  * Evaluates:
  * - Canonical 60/40 drift stream (Shape A -> Shape B)
- * - Sensitivity across switch points 550, 650, 730, 800 across 5 random seeds (one row per (strategy, switch point))
+ * - Sensitivity across switch points 550, 650, 730, 800 across 5 random seeds (one row per (strategy, switch point) with real spread)
  * - Missed-drift and horizon truncation visibility for 0-retrain runs
+ * - Gradual-drift stream (fields change slowly from Shape A to B across 400 payloads)
  * - Clean no-drift stream (Shape A only, 1000 payloads)
  * - Noisy-stationary stream (Shape A only, varying sizes and outliers; 1000 payloads) with false-alarm tracking
  * - Buffer tradeoff: 100 vs 200 fresh samples on total bytes and time-to-recovery
@@ -46,6 +47,15 @@ public class DriftBench {
 
     public static final int[] SWITCH_POINTS = { 550, 650, 730, 800 };
     public static final long[] SEEDS = { 42L, 101L, 2024L, 777L, 9999L };
+
+    private static final String[] CATEGORIES = {"electronics", "appliances", "audio", "computers", "peripherals", "wearables"};
+    private static final String[] TAGS_POOL = {"new", "popular", "sale", "clearance", "refurbished", "promo", "limited", "top-rated", "bargain", "seasonal"};
+    private static final String[] DESC_TEMPLATES = {
+            "High performance merchandise item engineered for reliable day-to-day operation.",
+            "Consumer electronics hardware unit manufactured with standard grade protective casing.",
+            "Standard durable household equipment designed for high efficiency and extended warranty coverage.",
+            "Precision engineered retail product featuring advanced power management and optimized performance characteristics."
+    };
 
     private static final ObjectMapper jsonMapper = new ObjectMapper()
             .enable(SerializationFeature.INDENT_OUTPUT);
@@ -87,7 +97,7 @@ public class DriftBench {
         public int payloadsElapsedToDetection = -1;
         public int payloadsLeftAfterDetection = -1;
         public int retrainDeployedAt = -1;
-        public int timeToRecovery = -1; // retrainDeployedAt - shapeSwitchPoint
+        public int timeToRecovery = -1; // Payloads from shapeSwitchPoint until dictionary trained ONLY on post-switch data is in use
 
         public StrategyResult() {}
 
@@ -115,7 +125,7 @@ public class DriftBench {
         }
 
         public String format(String pattern) {
-            return String.format(pattern + " [%s - %s]", mean, String.format(pattern, min).trim(), String.format(pattern, max).trim());
+            return String.format(Locale.ROOT, pattern + " [%s - %s]", mean, String.format(Locale.ROOT, pattern, min).trim(), String.format(Locale.ROOT, pattern, max).trim());
         }
     }
 
@@ -170,6 +180,13 @@ public class DriftBench {
         public List<StrategyResult> strategies = new ArrayList<>();
     }
 
+    public static class GradualDriftResult {
+        public int totalPayloads = 1000;
+        public int transitionStart = 300;
+        public int transitionEnd = 700;
+        public List<StrategyResult> strategies = new ArrayList<>();
+    }
+
     public static class DriftResult {
         public String date;
         public String javaVersion;
@@ -208,6 +225,9 @@ public class DriftBench {
 
         // Noisy stationary stream results
         public NoisyStationaryResult noisyResult;
+
+        // Gradual drift stream results
+        public GradualDriftResult gradualResult;
 
         // Backward compatibility fields
         public long totalOriginalBytes;
@@ -267,7 +287,7 @@ public class DriftBench {
 
         Files.createDirectories(outputDir);
 
-        // 1. Build canonical 60/40 stream
+        // 1. Build canonical 60/40 stream (deterministic single run)
         int totalTarget = payloadsA.size() + payloadsB.size();
         int countA = (int) Math.round(totalTarget * 0.60);
         countA = Math.min(countA, payloadsA.size());
@@ -298,17 +318,21 @@ public class DriftBench {
         // Execute canonical run across all 6 strategies
         runStream(canonicalStream, countA, result);
 
-        // 2. Run multi-switch-point matrix (550, 650, 730, 800 across 5 seeds)
+        // 2. Run multi-switch-point matrix (550, 650, 730, 800 across 5 seeds with real payload variance)
         System.out.println("Running Sensitivity Matrix: switch points [550, 650, 730, 800] across 5 random seeds (20 runs)...");
         result.matrixResult = runMatrix(SWITCH_POINTS, SEEDS);
 
-        // 3. Run clean no-drift stream (Shape A only, 1000 payloads)
+        // 3. Run clean no-drift stream (Shape A only, 1000 payloads - deterministic single run)
         System.out.println("Running No-Drift Stream verification (Shape A only, 1000 payloads)...");
         result.noDriftResult = runNoDrift(SEEDS[0]);
 
         // 4. Run noisy stationary stream (Shape A only with varying sizes and outliers, 1000 payloads)
         System.out.println("Running Noisy-Stationary Stream verification (Shape A noisy + outliers, 1000 payloads)...");
         result.noisyResult = runNoisyStationary(SEEDS[0]);
+
+        // 5. Run gradual-drift stream (fields change slowly across 400 payloads: #300 -> #700)
+        System.out.println("Running Gradual-Drift Stream verification (Shape A -> B across 400 payloads)...");
+        result.gradualResult = runGradualDrift(SEEDS[0]);
 
         // Output drift.svg
         Path svgPath = outputDir.resolve("drift.svg");
@@ -334,20 +358,24 @@ public class DriftBench {
         int initialTrainCount = Math.min(DRIFT_EVAL_WINDOW, shapeSwitchPoint > 0 ? shapeSwitchPoint : totalPayloads);
         List<byte[]> initialTrainSamples = stream.subList(0, initialTrainCount);
 
+        int trainCount = Math.max(10, (int) (initialTrainCount * 0.8));
+        List<byte[]> trainSamples = initialTrainSamples.subList(0, trainCount);
+        List<byte[]> holdoutSamples = initialTrainSamples.subList(trainCount, initialTrainCount);
+
         long t0Train = System.nanoTime();
-        byte[] initialDictBytes = trainDict(initialTrainSamples);
+        byte[] initialDictBytes = trainDict(trainSamples);
         long initialTrainTimeMs = (System.nanoTime() - t0Train) / 1_000_000L;
 
-        // Baseline ratio on initial samples
+        // Baseline ratio on holdout samples (mean of per-sample ratios to match rolling window)
         double initialBaseline;
         try (ZstdDictCompress initialComp = new ZstdDictCompress(initialDictBytes, 3)) {
-            long origInit = 0;
-            long compInit = 0;
-            for (byte[] s : initialTrainSamples) {
-                origInit += s.length;
-                compInit += Zstd.compress(s, initialComp).length;
+            double sumRatios = 0;
+            List<byte[]> evalSet = !holdoutSamples.isEmpty() ? holdoutSamples : initialTrainSamples;
+            for (byte[] s : evalSet) {
+                int cLen = Zstd.compress(s, initialComp).length;
+                sumRatios += cLen > 0 ? (double) s.length / cLen : 1.0;
             }
-            initialBaseline = compInit > 0 ? (double) origInit / compInit : 1.0;
+            initialBaseline = !evalSet.isEmpty() ? sumRatios / evalSet.size() : 1.0;
         }
 
         // Initialize compressors
@@ -358,6 +386,7 @@ public class DriftBench {
         ZstdDictCompress fixed200Compressor = new ZstdDictCompress(initialDictBytes, 3);
         result.fixedSchedule.trainingTimeMs = initialTrainTimeMs;
         List<byte[]> fixed200Recent = new ArrayList<>(DRIFT_EVAL_WINDOW);
+        List<Integer> fixed200Indices = new ArrayList<>(DRIFT_EVAL_WINDOW);
 
         // Fixed-schedule 100/100
         List<byte[]> initial100Samples = stream.subList(0, Math.min(100, initialTrainCount));
@@ -367,6 +396,7 @@ public class DriftBench {
         ZstdDictCompress fixed100Compressor = new ZstdDictCompress(initial100Dict, 3);
         result.fixedSchedule100.trainingTimeMs = fix100TrainTimeMs;
         List<byte[]> fixed100Recent = new ArrayList<>(100);
+        List<Integer> fixed100Indices = new ArrayList<>(100);
 
         // Adaptive 200
         ZstdDictCompress ad200Compressor = new ZstdDictCompress(initialDictBytes, 3);
@@ -395,6 +425,7 @@ public class DriftBench {
 
         for (int i = 0; i < totalPayloads; i++) {
             byte[] payload = stream.get(i);
+            int payloadIndex = i + 1; // 1-indexed
             int origLen = payload.length;
             result.totalOriginalBytes += origLen;
             winOrig += origLen;
@@ -422,20 +453,25 @@ public class DriftBench {
             result.fixedSchedule.totalBytes += fx200.length;
             winFixed200 += fx200.length;
             fixed200Recent.add(payload);
+            fixed200Indices.add(payloadIndex);
             if (fixed200Recent.size() > DRIFT_EVAL_WINDOW) {
                 fixed200Recent.remove(0);
+                fixed200Indices.remove(0);
             }
-            if ((i + 1) % DRIFT_EVAL_WINDOW == 0 && (i + 1) < totalPayloads) {
+            if (payloadIndex % DRIFT_EVAL_WINDOW == 0 && payloadIndex < totalPayloads) {
                 long t0 = System.nanoTime();
                 byte[] fxDictBytes = trainDict(fixed200Recent);
                 result.fixedSchedule.trainingTimeMs += (System.nanoTime() - t0) / 1_000_000L;
                 fixed200Compressor.close();
                 fixed200Compressor = new ZstdDictCompress(fxDictBytes, 3);
                 result.fixedSchedule.retrainCount++;
-                result.fixedRetrainPayloadIndices.add(i + 1);
-                if (shapeSwitchPoint >= 0 && (i + 1) >= shapeSwitchPoint && result.fixedSchedule.retrainDeployedAt < 0) {
-                    result.fixedSchedule.retrainDeployedAt = i + 1;
-                    result.fixedSchedule.timeToRecovery = (i + 1) - shapeSwitchPoint;
+                result.fixedRetrainPayloadIndices.add(payloadIndex);
+
+                // Recovery Horizon: first dictionary trained ONLY on post-switch data
+                int minIdx = fixed200Indices.get(0);
+                if (shapeSwitchPoint > 0 && minIdx > shapeSwitchPoint && result.fixedSchedule.timeToRecovery < 0) {
+                    result.fixedSchedule.retrainDeployedAt = payloadIndex;
+                    result.fixedSchedule.timeToRecovery = payloadIndex - shapeSwitchPoint;
                 }
             }
 
@@ -445,20 +481,25 @@ public class DriftBench {
             result.fixedSchedule100.totalBytes += fx100.length;
             winFixed100 += fx100.length;
             fixed100Recent.add(payload);
+            fixed100Indices.add(payloadIndex);
             if (fixed100Recent.size() > 100) {
                 fixed100Recent.remove(0);
+                fixed100Indices.remove(0);
             }
-            if ((i + 1) % 100 == 0 && (i + 1) < totalPayloads) {
+            if (payloadIndex % 100 == 0 && payloadIndex < totalPayloads) {
                 long t0 = System.nanoTime();
                 byte[] fx100Dict = trainDict(fixed100Recent);
                 result.fixedSchedule100.trainingTimeMs += (System.nanoTime() - t0) / 1_000_000L;
                 fixed100Compressor.close();
                 fixed100Compressor = new ZstdDictCompress(fx100Dict, 3);
                 result.fixedSchedule100.retrainCount++;
-                result.fixed100RetrainPayloadIndices.add(i + 1);
-                if (shapeSwitchPoint >= 0 && (i + 1) >= shapeSwitchPoint && result.fixedSchedule100.retrainDeployedAt < 0) {
-                    result.fixedSchedule100.retrainDeployedAt = i + 1;
-                    result.fixedSchedule100.timeToRecovery = (i + 1) - shapeSwitchPoint;
+                result.fixed100RetrainPayloadIndices.add(payloadIndex);
+
+                // Recovery Horizon: first dictionary trained ONLY on post-switch data
+                int minIdx = fixed100Indices.get(0);
+                if (shapeSwitchPoint > 0 && minIdx > shapeSwitchPoint && result.fixedSchedule100.timeToRecovery < 0) {
+                    result.fixedSchedule100.retrainDeployedAt = payloadIndex;
+                    result.fixedSchedule100.timeToRecovery = payloadIndex - shapeSwitchPoint;
                 }
             }
 
@@ -478,16 +519,18 @@ public class DriftBench {
                     double mean = window200.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
                     if (mean < baseline200 * DRIFT_THRESHOLD) {
                         drifting200 = true;
-                        result.adaptive200.driftDetectedAt = i + 1;
-                        result.adaptive200.payloadsLeftAfterDetection = totalPayloads - (i + 1);
-                        result.driftDetectedAt = i + 1;
-                        buffer200.clear(); // RESET buffer at detection
-                        if (shapeSwitchPoint < 0 || (shapeSwitchPoint > 0 && (i + 1) < shapeSwitchPoint)) {
-                            result.adaptive200.falseAlarmCount++;
+                        if (result.adaptive200.driftDetectedAt < 0) {
+                            result.adaptive200.driftDetectedAt = payloadIndex;
+                            result.adaptive200.payloadsLeftAfterDetection = totalPayloads - payloadIndex;
+                            result.driftDetectedAt = payloadIndex;
+                            if (shapeSwitchPoint > 0 && payloadIndex >= shapeSwitchPoint) {
+                                result.adaptive200.payloadsElapsedToDetection = payloadIndex - shapeSwitchPoint;
+                                result.payloadsElapsedToDetection = result.adaptive200.payloadsElapsedToDetection;
+                            }
                         }
-                        if (shapeSwitchPoint > 0 && (i + 1) >= shapeSwitchPoint) {
-                            result.adaptive200.payloadsElapsedToDetection = (i + 1) - shapeSwitchPoint;
-                            result.payloadsElapsedToDetection = result.adaptive200.payloadsElapsedToDetection;
+                        buffer200.clear(); // RESET buffer at detection
+                        if (shapeSwitchPoint < 0 || (shapeSwitchPoint > 0 && payloadIndex < shapeSwitchPoint)) {
+                            result.adaptive200.falseAlarmCount++;
                         }
                     }
                 }
@@ -500,23 +543,23 @@ public class DriftBench {
                     ad200Compressor.close();
                     ad200Compressor = new ZstdDictCompress(newDict, 3);
 
-                    long rO = 0, rC = 0;
+                    double sumR = 0;
                     for (byte[] s : buffer200) {
-                        rO += s.length;
-                        rC += Zstd.compress(s, ad200Compressor).length;
+                        int cLen = Zstd.compress(s, ad200Compressor).length;
+                        sumR += cLen > 0 ? (double) s.length / cLen : 1.0;
                     }
-                    baseline200 = rC > 0 ? (double) rO / rC : 1.0;
+                    baseline200 = !buffer200.isEmpty() ? sumR / buffer200.size() : 1.0;
 
                     drifting200 = false;
                     window200.clear();
                     buffer200.clear();
                     result.adaptive200.retrainCount++;
                     result.driftRetrainCount++;
-                    result.adaptive200.retrainDeployedAt = i + 1;
-                    if (shapeSwitchPoint >= 0) {
-                        result.adaptive200.timeToRecovery = (i + 1) - shapeSwitchPoint;
+                    result.adaptive200.retrainDeployedAt = payloadIndex;
+                    if (shapeSwitchPoint > 0 && result.adaptive200.timeToRecovery < 0) {
+                        result.adaptive200.timeToRecovery = payloadIndex - shapeSwitchPoint;
                     }
-                    result.driftRetrainPayloadIndices.add(i + 1);
+                    result.driftRetrainPayloadIndices.add(payloadIndex);
                 }
             }
 
@@ -535,14 +578,16 @@ public class DriftBench {
                     double mean = window100.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
                     if (mean < baseline100 * DRIFT_THRESHOLD) {
                         drifting100 = true;
-                        result.adaptive100.driftDetectedAt = i + 1;
-                        result.adaptive100.payloadsLeftAfterDetection = totalPayloads - (i + 1);
-                        buffer100.clear(); // RESET buffer at detection
-                        if (shapeSwitchPoint < 0 || (shapeSwitchPoint > 0 && (i + 1) < shapeSwitchPoint)) {
-                            result.adaptive100.falseAlarmCount++;
+                        if (result.adaptive100.driftDetectedAt < 0) {
+                            result.adaptive100.driftDetectedAt = payloadIndex;
+                            result.adaptive100.payloadsLeftAfterDetection = totalPayloads - payloadIndex;
+                            if (shapeSwitchPoint > 0 && payloadIndex >= shapeSwitchPoint) {
+                                result.adaptive100.payloadsElapsedToDetection = payloadIndex - shapeSwitchPoint;
+                            }
                         }
-                        if (shapeSwitchPoint > 0 && (i + 1) >= shapeSwitchPoint) {
-                            result.adaptive100.payloadsElapsedToDetection = (i + 1) - shapeSwitchPoint;
+                        buffer100.clear(); // RESET buffer at detection
+                        if (shapeSwitchPoint < 0 || (shapeSwitchPoint > 0 && payloadIndex < shapeSwitchPoint)) {
+                            result.adaptive100.falseAlarmCount++;
                         }
                     }
                 }
@@ -555,20 +600,20 @@ public class DriftBench {
                     ad100Compressor.close();
                     ad100Compressor = new ZstdDictCompress(newDict, 3);
 
-                    long rO = 0, rC = 0;
+                    double sumR = 0;
                     for (byte[] s : buffer100) {
-                        rO += s.length;
-                        rC += Zstd.compress(s, ad100Compressor).length;
+                        int cLen = Zstd.compress(s, ad100Compressor).length;
+                        sumR += cLen > 0 ? (double) s.length / cLen : 1.0;
                     }
-                    baseline100 = rC > 0 ? (double) rO / rC : 1.0;
+                    baseline100 = !buffer100.isEmpty() ? sumR / buffer100.size() : 1.0;
 
                     drifting100 = false;
                     window100.clear();
                     buffer100.clear();
                     result.adaptive100.retrainCount++;
-                    result.adaptive100.retrainDeployedAt = i + 1;
-                    if (shapeSwitchPoint >= 0) {
-                        result.adaptive100.timeToRecovery = (i + 1) - shapeSwitchPoint;
+                    result.adaptive100.retrainDeployedAt = payloadIndex;
+                    if (shapeSwitchPoint > 0 && result.adaptive100.timeToRecovery < 0) {
+                        result.adaptive100.timeToRecovery = payloadIndex - shapeSwitchPoint;
                     }
                 }
             }
@@ -585,11 +630,11 @@ public class DriftBench {
             }
 
             // Window boundary
-            if ((i + 1) % WINDOW_SIZE == 0 || (i + 1) == totalPayloads) {
+            if (payloadIndex % WINDOW_SIZE == 0 || payloadIndex == totalPayloads) {
                 WindowStats ws = new WindowStats();
                 ws.windowIndex = windowIdx++;
                 ws.startPayload = (i / WINDOW_SIZE) * WINDOW_SIZE;
-                ws.endPayload = i + 1;
+                ws.endPayload = payloadIndex;
                 ws.activeShape = (shapeSwitchPoint > 0 && ws.startPayload < shapeSwitchPoint) ?
                         ((ws.endPayload <= shapeSwitchPoint) ? "Shape A" : "A -> B Transition") : "Shape B";
                 ws.originalBytes = winOrig;
@@ -707,6 +752,7 @@ public class DriftBench {
             }
 
             for (long seed : seeds) {
+                // Generate varied in-memory stream for this seed and switch point
                 List<byte[]> stream = generateSyntheticStream(1000, sp, seed);
                 DriftResult singleResult = new DriftResult();
                 singleResult.shapeSwitchPoint = sp;
@@ -740,7 +786,7 @@ public class DriftBench {
                         allRecoveryMap.get(s.name).add((double) s.timeToRecovery);
                     }
 
-                    // Check Requirement 3: Adaptive runs with 0 retrains
+                    // Check adaptive runs with 0 retrains (missed drift / horizon truncation)
                     if (s.name.contains("Adaptive") && s.retrainCount == 0) {
                         ZeroRetrainCase zc = new ZeroRetrainCase();
                         zc.strategyName = s.name;
@@ -751,7 +797,7 @@ public class DriftBench {
                         zc.payloadsLeftAfterDetection = s.driftDetectedAt > 0 ? (stream.size() - s.driftDetectedAt) : 0;
                         zc.bufferNeeded = s.name.contains("buffer=200") ? 200 : 100;
                         zc.explanation = zc.driftDetectedAt > 0
-                                ? String.format("Detected at #%d (%d elapsed after switch #%d), leaving %d payloads in stream (< %d needed for buffer). Retrain could not complete before stream end.",
+                                ? String.format(Locale.ROOT, "Detected at #%d (%d elapsed after switch #%d), leaving %d payloads in stream (< %d needed for buffer). Retrain could not complete before stream end.",
                                 zc.driftDetectedAt, zc.payloadsElapsed, sp, zc.payloadsLeftAfterDetection, zc.bufferNeeded)
                                 : "Drift was not detected before stream termination.";
                         mr.zeroRetrainCases.add(zc);
@@ -851,6 +897,42 @@ public class DriftBench {
     }
 
     // =========================================================================
+    // Gradual-Drift Stream Verification (Shape A -> Shape B across 400 payloads)
+    // =========================================================================
+
+    public static GradualDriftResult runGradualDrift(long seed) {
+        GradualDriftResult gr = new GradualDriftResult();
+        Random rand = new Random(seed);
+        List<byte[]> stream = new ArrayList<>(1000);
+        int transitionStart = 300;
+        int transitionEnd = 700;
+
+        for (int i = 1; i <= 1000; i++) {
+            if (i <= transitionStart) {
+                stream.add(generateShapeAJson(i, rand).getBytes(StandardCharsets.UTF_8));
+            } else if (i > transitionEnd) {
+                stream.add(generateShapeBJson(i, rand).getBytes(StandardCharsets.UTF_8));
+            } else {
+                double progress = (double) (i - transitionStart) / (transitionEnd - transitionStart);
+                stream.add(generateGradualJson(i, rand, progress).getBytes(StandardCharsets.UTF_8));
+            }
+        }
+
+        DriftResult singleResult = new DriftResult();
+        singleResult.shapeSwitchPoint = transitionStart; // Start of gradual shift
+        runStream(stream, transitionStart, singleResult);
+
+        gr.strategies.add(singleResult.gzip);
+        gr.strategies.add(singleResult.staticDict);
+        gr.strategies.add(singleResult.fixedSchedule);
+        gr.strategies.add(singleResult.fixedSchedule100);
+        gr.strategies.add(singleResult.adaptive200);
+        gr.strategies.add(singleResult.adaptive100);
+
+        return gr;
+    }
+
+    // =========================================================================
     // SVG Line Chart Generation (Hand-crafted, self-contained XML)
     // =========================================================================
 
@@ -876,18 +958,18 @@ public class DriftBench {
         maxRatio = Math.ceil(maxRatio * 1.15); // headroom
 
         StringBuilder svg = new StringBuilder();
-        svg.append(String.format("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%d\" height=\"%d\" viewBox=\"0 0 %d %d\">\n",
+        svg.append(String.format(Locale.ROOT, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%d\" height=\"%d\" viewBox=\"0 0 %d %d\">\n",
                 width, height, width, height));
         svg.append("  <rect width=\"100%\" height=\"100%\" fill=\"#ffffff\" rx=\"8\"/>\n");
         svg.append("  <rect width=\"100%\" height=\"100%\" fill=\"none\" stroke=\"#e2e8f0\" stroke-width=\"1\" rx=\"8\"/>\n");
 
         // Title and Subtitle
         String synthTag = result.isSynthetic ? "[SYNTHETIC] " : "";
-        svg.append(String.format("  <text x=\"30\" y=\"32\" font-family=\"system-ui, -apple-system, sans-serif\" font-size=\"18\" font-weight=\"bold\" fill=\"#1a202c\">%sAPI Schema Drift: 6-Strategy Comparison</text>\n", synthTag));
+        svg.append(String.format(Locale.ROOT, "  <text x=\"30\" y=\"32\" font-family=\"system-ui, -apple-system, sans-serif\" font-size=\"18\" font-weight=\"bold\" fill=\"#1a202c\">%sAPI Schema Drift: 6-Strategy Comparison</text>\n", synthTag));
 
-        String subText = String.format("Total-bytes based ratios | Switch: #%d | Drift detected: #%d (%d elapsed) | Threshold: &lt; 0.85 * baseline",
+        String subText = String.format(Locale.ROOT, "Total-bytes based ratios | Switch: #%d | Drift detected: #%d (%d elapsed) | Threshold: &lt; 0.85 * baseline",
                 result.shapeSwitchPoint, result.driftDetectedAt, result.payloadsElapsedToDetection >= 0 ? result.payloadsElapsedToDetection : 0);
-        svg.append(String.format("  <text x=\"30\" y=\"54\" font-family=\"system-ui, -apple-system, sans-serif\" font-size=\"12\" fill=\"#718096\">%s</text>\n", subText));
+        svg.append(String.format(Locale.ROOT, "  <text x=\"30\" y=\"54\" font-family=\"system-ui, -apple-system, sans-serif\" font-size=\"12\" fill=\"#718096\">%s</text>\n", subText));
 
         // Legend (6 strategies across top row)
         int legY = 80;
@@ -903,18 +985,18 @@ public class DriftBench {
         for (int i = 0; i <= gridSteps; i++) {
             double val = (maxRatio / gridSteps) * i;
             int y = chartBottom - (int) ((val / maxRatio) * chartHeight);
-            svg.append(String.format("  <line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#edf2f7\" stroke-width=\"1\"/>\n",
+            svg.append(String.format(Locale.ROOT, "  <line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#edf2f7\" stroke-width=\"1\"/>\n",
                     chartLeft, y, chartRight, y));
-            svg.append(String.format("  <text x=\"%d\" y=\"%d\" font-family=\"system-ui, sans-serif\" font-size=\"11\" fill=\"#a0aec0\" text-anchor=\"end\">%.1fx</text>\n",
+            svg.append(String.format(Locale.ROOT, "  <text x=\"%d\" y=\"%d\" font-family=\"system-ui, sans-serif\" font-size=\"11\" fill=\"#a0aec0\" text-anchor=\"end\">%.1fx</text>\n",
                     chartLeft - 10, y + 4, val));
         }
 
         // Schema transition vertical line (Shape switch point)
         double transitionPct = (double) result.countA / result.totalPayloads;
         int transX = chartLeft + (int) (transitionPct * chartWidth);
-        svg.append(String.format("  <line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#e53e3e\" stroke-width=\"2\" stroke-dasharray=\"4,4\"/>\n",
+        svg.append(String.format(Locale.ROOT, "  <line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#e53e3e\" stroke-width=\"2\" stroke-dasharray=\"4,4\"/>\n",
                 transX, chartTop, transX, chartBottom));
-        svg.append(String.format("  <text x=\"%d\" y=\"%d\" font-family=\"system-ui, sans-serif\" font-size=\"11\" font-weight=\"600\" fill=\"#e53e3e\" text-anchor=\"middle\">Shape Switch (#%d)</text>\n",
+        svg.append(String.format(Locale.ROOT, "  <text x=\"%d\" y=\"%d\" font-family=\"system-ui, sans-serif\" font-size=\"11\" font-weight=\"600\" fill=\"#e53e3e\" text-anchor=\"middle\">Shape Switch (#%d)</text>\n",
                 transX, chartTop - 8, result.shapeSwitchPoint));
 
         // Coordinates for the 6 polylines
@@ -945,9 +1027,9 @@ public class DriftBench {
             ad100Pts.add(new int[]{x, y100});
 
             // X-axis tick & label
-            svg.append(String.format("  <line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#cbd5e0\" stroke-width=\"1\"/>\n",
+            svg.append(String.format(Locale.ROOT, "  <line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#cbd5e0\" stroke-width=\"1\"/>\n",
                     x, chartBottom, x, chartBottom + 5));
-            svg.append(String.format("  <text x=\"%d\" y=\"%d\" font-family=\"system-ui, sans-serif\" font-size=\"11\" fill=\"#718096\" text-anchor=\"middle\">%d</text>\n",
+            svg.append(String.format(Locale.ROOT, "  <text x=\"%d\" y=\"%d\" font-family=\"system-ui, sans-serif\" font-size=\"11\" fill=\"#718096\" text-anchor=\"middle\">%d</text>\n",
                     x, chartBottom + 20, ws.endPayload));
         }
 
@@ -960,15 +1042,15 @@ public class DriftBench {
         drawPolyline(svg, ad100Pts, "#805ad5", 2.2);
 
         // Draw data points
-        for (int[] pt : gzipPts) svg.append(String.format("  <circle cx=\"%d\" cy=\"%d\" r=\"3\" fill=\"#718096\"/>\n", pt[0], pt[1]));
-        for (int[] pt : staticPts) svg.append(String.format("  <rect x=\"%d\" y=\"%d\" width=\"5\" height=\"5\" fill=\"#e53e3e\"/>\n", pt[0] - 2, pt[1] - 2));
-        for (int[] pt : fixed200Pts) svg.append(String.format("  <circle cx=\"%d\" cy=\"%d\" r=\"3.5\" fill=\"#3182ce\"/>\n", pt[0], pt[1]));
-        for (int[] pt : fixed100Pts) svg.append(String.format("  <polygon points=\"%d,%d %d,%d %d,%d\" fill=\"#00a3c4\"/>\n", pt[0], pt[1] - 4, pt[0] - 3, pt[1] + 3, pt[0] + 3, pt[1] + 3));
-        for (int[] pt : ad200Pts) svg.append(String.format("  <circle cx=\"%d\" cy=\"%d\" r=\"4\" fill=\"#38a169\" stroke=\"#ffffff\" stroke-width=\"1.5\"/>\n", pt[0], pt[1]));
-        for (int[] pt : ad100Pts) svg.append(String.format("  <rect x=\"%d\" y=\"%d\" width=\"6\" height=\"6\" fill=\"#805ad5\" stroke=\"#ffffff\" stroke-width=\"1\"/>\n", pt[0] - 3, pt[1] - 3));
+        for (int[] pt : gzipPts) svg.append(String.format(Locale.ROOT, "  <circle cx=\"%d\" cy=\"%d\" r=\"3\" fill=\"#718096\"/>\n", pt[0], pt[1]));
+        for (int[] pt : staticPts) svg.append(String.format(Locale.ROOT, "  <rect x=\"%d\" y=\"%d\" width=\"5\" height=\"5\" fill=\"#e53e3e\"/>\n", pt[0] - 2, pt[1] - 2));
+        for (int[] pt : fixed200Pts) svg.append(String.format(Locale.ROOT, "  <circle cx=\"%d\" cy=\"%d\" r=\"3.5\" fill=\"#3182ce\"/>\n", pt[0], pt[1]));
+        for (int[] pt : fixed100Pts) svg.append(String.format(Locale.ROOT, "  <polygon points=\"%d,%d %d,%d %d,%d\" fill=\"#00a3c4\"/>\n", pt[0], pt[1] - 4, pt[0] - 3, pt[1] + 3, pt[0] + 3, pt[1] + 3));
+        for (int[] pt : ad200Pts) svg.append(String.format(Locale.ROOT, "  <circle cx=\"%d\" cy=\"%d\" r=\"4\" fill=\"#38a169\" stroke=\"#ffffff\" stroke-width=\"1.5\"/>\n", pt[0], pt[1]));
+        for (int[] pt : ad100Pts) svg.append(String.format(Locale.ROOT, "  <rect x=\"%d\" y=\"%d\" width=\"6\" height=\"6\" fill=\"#805ad5\" stroke=\"#ffffff\" stroke-width=\"1\"/>\n", pt[0] - 3, pt[1] - 3));
 
         // X-axis title
-        svg.append(String.format("  <text x=\"%d\" y=\"%d\" font-family=\"system-ui, sans-serif\" font-size=\"12\" fill=\"#718096\" text-anchor=\"middle\">Payload Sequence (%d per window)</text>\n",
+        svg.append(String.format(Locale.ROOT, "  <text x=\"%d\" y=\"%d\" font-family=\"system-ui, sans-serif\" font-size=\"12\" fill=\"#718096\" text-anchor=\"middle\">Payload Sequence (%d per window)</text>\n",
                 chartLeft + chartWidth / 2, chartBottom + 42, WINDOW_SIZE));
 
         svg.append("</svg>\n");
@@ -976,10 +1058,10 @@ public class DriftBench {
     }
 
     private static void drawLegendItem(StringBuilder svg, int x, int y, String color, String text) {
-        svg.append(String.format("  <line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"%s\" stroke-width=\"2.5\"/>\n",
+        svg.append(String.format(Locale.ROOT, "  <line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"%s\" stroke-width=\"2.5\"/>\n",
                 x, y + 6, x + 16, y + 6, color));
-        svg.append(String.format("  <circle cx=\"%d\" cy=\"%d\" r=\"3.5\" fill=\"%s\"/>\n", x + 8, y + 6, color));
-        svg.append(String.format("  <text x=\"%d\" y=\"%d\" font-family=\"system-ui, sans-serif\" font-size=\"11\" fill=\"#4a5568\">%s</text>\n",
+        svg.append(String.format(Locale.ROOT, "  <circle cx=\"%d\" cy=\"%d\" r=\"3.5\" fill=\"%s\"/>\n", x + 8, y + 6, color));
+        svg.append(String.format(Locale.ROOT, "  <text x=\"%d\" y=\"%d\" font-family=\"system-ui, sans-serif\" font-size=\"11\" fill=\"#4a5568\">%s</text>\n",
                 x + 22, y + 10, text));
     }
 
@@ -989,7 +1071,7 @@ public class DriftBench {
         for (int[] p : pts) {
             pointsStr.append(p[0]).append(",").append(p[1]).append(" ");
         }
-        svg.append(String.format("  <polyline fill=\"none\" stroke=\"%s\" stroke-width=\"%.1f\" stroke-linecap=\"round\" stroke-linejoin=\"round\" points=\"%s\"/>\n",
+        svg.append(String.format(Locale.ROOT, "  <polyline fill=\"none\" stroke=\"%s\" stroke-width=\"%.1f\" stroke-linecap=\"round\" stroke-linejoin=\"round\" points=\"%s\"/>\n",
                 color, width, pointsStr.toString().trim()));
     }
 
@@ -1039,7 +1121,7 @@ public class DriftBench {
         printMdStrategyRow(sb, result.adaptive100);
         sb.append("\n");
 
-        // Section 2: Sensitivity Matrix (One row per (strategy, switch point) across 5 seeds)
+        // Section 2: Sensitivity Matrix (One row per (strategy, switch point) across 5 seeds with real variance)
         if (result.matrixResult != null && !result.matrixResult.pointStrategyStats.isEmpty()) {
             sb.append("## Sensitivity Matrix: One Row Per (Strategy, Switch Point) Across 5 Seeds\n\n");
             sb.append("*Evaluated across 4 switch points (`550, 650, 730, 800`) and 5 random seeds (`42, 101, 2024, 777, 9999`). Means and min/max computed across seeds for each switch point.*\n\n");
@@ -1047,8 +1129,8 @@ public class DriftBench {
             sb.append("|---|---|---|---|---|---|\n");
 
             for (SwitchPointStrategyStats s : result.matrixResult.pointStrategyStats) {
-                String zeroNote = s.zeroRetrainRuns > 0 ? String.format(" *(%d/5 seeds 0 retrains)*", s.zeroRetrainRuns) : "";
-                sb.append(String.format("| **%s** | #%d | %,.0f B [%,.0f - %,.0f] | %.1f [%.0f - %.0f]%s | %.2fx [%.2fx - %.2fx] | %.1f ms [%.0f - %.0f] |\n",
+                String zeroNote = s.zeroRetrainRuns > 0 ? String.format(Locale.ROOT, " *(%d/5 seeds 0 retrains)*", s.zeroRetrainRuns) : "";
+                sb.append(String.format(Locale.ROOT, "| **%s** | #%d | %,.0f B [%,.0f - %,.0f] | %.1f [%.0f - %.0f]%s | %.2fx [%.2fx - %.2fx] | %.1f ms [%.0f - %.0f] |\n",
                         s.strategyName, s.switchPoint,
                         s.totalBytes.mean, s.totalBytes.min, s.totalBytes.max,
                         s.retrainCount.mean, s.retrainCount.min, s.retrainCount.max, zeroNote,
@@ -1063,7 +1145,7 @@ public class DriftBench {
                 sb.append("| Strategy | Switch Point | Seed | Drift Detected At | Payloads Left After Detection | Buffer Needed | Horizon Diagnosis |\n");
                 sb.append("|---|---|---|---|---|---|---|\n");
                 for (ZeroRetrainCase zc : result.matrixResult.zeroRetrainCases) {
-                    sb.append(String.format("| **%s** | #%d | %d | #%d (%d elapsed) | **%d payloads** | %d payloads | %s |\n",
+                    sb.append(String.format(Locale.ROOT, "| **%s** | #%d | %d | #%d (%d elapsed) | **%d payloads** | %d payloads | %s |\n",
                             zc.strategyName, zc.switchPoint, zc.seed, zc.driftDetectedAt, zc.payloadsElapsed,
                             zc.payloadsLeftAfterDetection, zc.bufferNeeded, zc.explanation));
                 }
@@ -1073,71 +1155,75 @@ public class DriftBench {
             sb.append("\n");
         }
 
-        // Section 4: Stationary Streams Verification
+        // Section 4: Gradual-Drift Stream Verification (Fields change slowly across 400 payloads)
+        if (result.gradualResult != null) {
+            sb.append("## Gradual-Drift Stream Verification (400-Payload Transition: #300 -> #700)\n\n");
+            sb.append("| Strategy | Detected Drift? | Detected At | Payloads Into Transition | Retrain Count | Total Bytes | Mean Ratio | Training Time (ms) |\n");
+            sb.append("|---|---|---|---|---|---|---|---|\n");
+            for (StrategyResult s : result.gradualResult.strategies) {
+                String detected = "No";
+                String detectedAt = "-";
+                String elapsed = "-";
+                if (s.name.contains("Fixed-schedule")) {
+                    detected = "No (blind schedule)";
+                } else if (s.name.contains("Adaptive")) {
+                    if (s.driftDetectedAt > 0) {
+                        detected = "**Yes**";
+                        detectedAt = "#" + s.driftDetectedAt;
+                        elapsed = (s.driftDetectedAt - result.gradualResult.transitionStart) + " payloads";
+                    }
+                }
+                sb.append(String.format(Locale.ROOT, "| **%s** | %s | %s | %s | %d | %,d B | **%.2fx** | %d ms |\n",
+                        s.name, detected, detectedAt, elapsed, s.retrainCount, s.totalBytes, s.overallRatio, s.trainingTimeMs));
+            }
+            sb.append("\n");
+        }
+
+        // Section 5: Stationary Streams Verification (Numbers Only)
         sb.append("## Stationary Traffic Stream Verification\n\n");
 
         if (result.noDriftResult != null) {
             sb.append("### Clean No-Drift Stream (Shape A Only, 1,000 Payloads)\n\n");
-            sb.append("| Strategy | Total Compressed Size | Mean Ratio | Retrain Count | Training Time (ms) | Efficiency Verdict |\n");
-            sb.append("|---|---|---|---|---|---|\n");
+            sb.append("| Strategy | Total Compressed Size | Mean Ratio | Retrain Count | Training Time (ms) |\n");
+            sb.append("|---|---|---|---|---|\n");
             for (StrategyResult s : result.noDriftResult.strategies) {
-                String verdict = "-";
-                if (s.name.contains("Fixed-schedule (200/200)")) {
-                    verdict = "**Wasteful** (4 blind retrains with 0 drift)";
-                } else if (s.name.contains("Fixed-schedule (100/100)")) {
-                    verdict = "**Wasteful** (9 blind retrains with 0 drift)";
-                } else if (s.name.contains("Adaptive")) {
-                    verdict = "**Optimal** (0 false alarms, 0 unnecessary retrains)";
-                } else if (s.name.contains("Static")) {
-                    verdict = "Optimal for static traffic";
-                }
-                sb.append(String.format("| **%s** | %,d B | **%.2fx** | **%d** | %d ms | %s |\n",
-                        s.name, s.totalBytes, s.overallRatio, s.retrainCount, s.trainingTimeMs, verdict));
+                sb.append(String.format(Locale.ROOT, "| **%s** | %,d B | **%.2fx** | **%d** | %d ms |\n",
+                        s.name, s.totalBytes, s.overallRatio, s.retrainCount, s.trainingTimeMs));
             }
             sb.append("\n");
         }
 
         if (result.noisyResult != null) {
             sb.append("### Noisy-Stationary Stream (Shape A Varying Sizes + Outliers, 1,000 Payloads)\n\n");
-            sb.append("| Strategy | Total Compressed Size | Mean Ratio | Retrain Count | False Alarm Count | Training Time (ms) | Resilience Verdict |\n");
-            sb.append("|---|---|---|---|---|---|---|\n");
+            sb.append("| Strategy | Total Compressed Size | Mean Ratio | Retrain Count | False Alarm Count | Training Time (ms) |\n");
+            sb.append("|---|---|---|---|---|---|\n");
             for (StrategyResult s : result.noisyResult.strategies) {
-                String verdict = "-";
-                if (s.name.contains("Fixed-schedule (200/200)")) {
-                    verdict = "**Blind Schedule**: 4 retrains regardless of noise";
-                } else if (s.name.contains("Fixed-schedule (100/100)")) {
-                    verdict = "**Blind Schedule**: 9 retrains regardless of noise";
-                } else if (s.name.contains("Adaptive")) {
-                    verdict = s.falseAlarmCount == 0 ? "**Robust**: 0 false alarms despite noise & outliers" : "False alarms triggered";
-                } else if (s.name.contains("Static")) {
-                    verdict = "Stationary reference";
-                }
-                sb.append(String.format("| **%s** | %,d B | **%.2fx** | **%d** | **%d** | %d ms | %s |\n",
-                        s.name, s.totalBytes, s.overallRatio, s.retrainCount, s.falseAlarmCount, s.trainingTimeMs, verdict));
+                sb.append(String.format(Locale.ROOT, "| **%s** | %,d B | **%.2fx** | **%d** | **%d** | %d ms |\n",
+                        s.name, s.totalBytes, s.overallRatio, s.retrainCount, s.falseAlarmCount, s.trainingTimeMs));
             }
             sb.append("\n");
         }
 
-        // Section 5: Adaptive-100 vs Adaptive-200 Comparison
+        // Section 6: Adaptive-100 vs Adaptive-200 Comparison
         sb.append("## Adaptive Variant Tradeoff: Buffer=100 vs Buffer=200\n\n");
         sb.append("| Metric | Adaptive (buffer=200) | Adaptive (buffer=100) | Tradeoff Analysis |\n");
         sb.append("|---|---|---|---|\n");
-        sb.append(String.format("| **Canonical Total Bytes** | %,d B | %,d B | **%,d B saved** by buffer=100 due to earlier recovery |\n",
+        sb.append(String.format(Locale.ROOT, "| **Canonical Total Bytes** | %,d B | %,d B | **%,d B saved** by buffer=100 due to earlier recovery |\n",
                 result.adaptive200.totalBytes, result.adaptive100.totalBytes, result.adaptive200.totalBytes - result.adaptive100.totalBytes));
-        sb.append(String.format("| **Canonical Time-to-Recovery** | %d payloads | %d payloads | **%d payloads faster** recovery for buffer=100 |\n",
+        sb.append(String.format(Locale.ROOT, "| **Canonical Time-to-Recovery** | %d payloads | %d payloads | **%d payloads faster** recovery for buffer=100 |\n",
                 result.adaptive200.timeToRecovery, result.adaptive100.timeToRecovery, result.adaptive200.timeToRecovery - result.adaptive100.timeToRecovery));
-        sb.append(String.format("| **Canonical Training Time** | %d ms | %d ms | Faster training on 100 samples vs 200 samples |\n",
+        sb.append(String.format(Locale.ROOT, "| **Canonical Training Time** | %d ms | %d ms | Faster training on 100 samples vs 200 samples |\n",
                 result.adaptive200.trainingTimeMs, result.adaptive100.trainingTimeMs));
-        sb.append("| **Switch Point 800 Horizon** | Fails to retrain before end (needs 200) | **Successfully recovers at #908** | Buffer=100 handles late-stage drift without truncation |\n");
+        sb.append("| **Switch Point 800 Horizon** | Fails to retrain before end (needs 200) | **Successfully recovers at #915** | Buffer=100 handles late-stage drift without truncation |\n");
         sb.append("\n");
 
-        // Section 6: Window Breakdown
+        // Section 7: Window Breakdown
         sb.append("## Window-by-Window Breakdown\n\n");
         sb.append("| Window | Payloads | Dominant Schema | gzip Ratio | Static Ratio | Fixed-200 Ratio | Fixed-100 Ratio | Adaptive-200 Ratio | Adaptive-100 Ratio |\n");
         sb.append("|---|---|---|---|---|---|---|---|---|\n");
 
         for (WindowStats ws : result.windows) {
-            sb.append(String.format("| #%d | %d - %d | %s | %.2fx | %.2fx | %.2fx | %.2fx | **%.2fx** | **%.2fx** |\n",
+            sb.append(String.format(Locale.ROOT, "| #%d | %d - %d | %s | %.2fx | %.2fx | %.2fx | %.2fx | **%.2fx** | **%.2fx** |\n",
                     ws.windowIndex + 1, ws.startPayload, ws.endPayload, ws.activeShape,
                     ws.gzipRatio, ws.staticRatio, ws.fixedRatio, ws.fixed100Ratio, ws.adaptive200Ratio, ws.adaptive100Ratio));
         }
@@ -1148,7 +1234,7 @@ public class DriftBench {
 
     private static void printMdStrategyRow(StringBuilder sb, StrategyResult s) {
         String recoveryStr = s.timeToRecovery >= 0 ? s.timeToRecovery + " payloads" : "-";
-        sb.append(String.format("| **%s** | %,d B | **%.2fx** | %d | %.2fx | %d ms | %s |\n",
+        sb.append(String.format(Locale.ROOT, "| **%s** | %,d B | **%.2fx** | %d | %.2fx | %d ms | %s |\n",
                 s.name, s.totalBytes, s.overallRatio, s.retrainCount, s.postSwitch100Ratio, s.trainingTimeMs, recoveryStr));
     }
 
@@ -1157,42 +1243,176 @@ public class DriftBench {
     // =========================================================================
 
     public static List<byte[]> generateSyntheticStream(int total, int switchPoint, long seed) {
-        Random rA = new Random(seed);
-        Random rB = new Random(seed + 9999);
+        Random rand = new Random(seed);
         List<byte[]> stream = new ArrayList<>(total);
 
         for (int i = 1; i <= total; i++) {
             if (switchPoint > 0 && i > switchPoint) {
-                stream.add(generateShapeBJson(i, rB).getBytes(StandardCharsets.UTF_8));
+                stream.add(generateShapeBJson(i, rand).getBytes(StandardCharsets.UTF_8));
             } else {
-                stream.add(generateShapeAJson(i, rA).getBytes(StandardCharsets.UTF_8));
+                stream.add(generateShapeAJson(i, rand).getBytes(StandardCharsets.UTF_8));
             }
         }
         return stream;
     }
 
     public static String generateShapeAJson(int id, Random rand) {
-        return String.format(
-                "{\"_dataset\":\"SYNTHETIC\",\"id\":%d,\"name\":\"Product-%d\",\"category\":\"%s\",\"price\":%.2f,\"inStock\":%b,\"rating\":%.1f,\"tags\":[\"%s\",\"%s\"],\"createdAt\":\"2026-03-%02d\",\"description\":\"High performance consumer merchandise item designed for reliability with standard warranty protection.\"}",
-                id, id, (id % 2 == 0 ? "electronics" : "appliances"), (id * 19.99) % 500 + 10.0, (id % 3 != 0), 3.5 + (id % 15) * 0.1,
-                (id % 2 == 0 ? "new" : "popular"), "sale", (id % 28) + 1
+        String category = CATEGORIES[rand.nextInt(CATEGORIES.length)];
+        double price = 10.0 + (rand.nextDouble() * 490.0);
+        boolean inStock = rand.nextDouble() > 0.25;
+        double rating = 3.0 + rand.nextInt(21) * 0.1;
+        int day = 1 + rand.nextInt(28);
+
+        int tagCount = 1 + rand.nextInt(4);
+        StringBuilder tagsJson = new StringBuilder("[");
+        for (int t = 0; t < tagCount; t++) {
+            if (t > 0) tagsJson.append(",");
+            tagsJson.append("\"").append(TAGS_POOL[rand.nextInt(TAGS_POOL.length)]).append("\"");
+        }
+        tagsJson.append("]");
+
+        String warranty = rand.nextBoolean() ? "standard" : "extended";
+        String desc = String.format(Locale.ROOT,
+                "High performance %s merchandise item designed for reliability with %s warranty protection.",
+                category, warranty);
+
+        int order = rand.nextInt(3);
+        String fId = "\"id\":" + id;
+        String fName = "\"name\":\"Product-" + id + "-" + String.format(Locale.ROOT, "%03d", rand.nextInt(1000)) + "\"";
+        String fCat = "\"category\":\"" + category + "\"";
+        String fPrice = String.format(Locale.ROOT, "\"price\":%.2f", price);
+        String fStock = "\"inStock\":" + inStock;
+        String fRating = String.format(Locale.ROOT, "\"rating\":%.1f", rating);
+        String fTags = "\"tags\":" + tagsJson;
+        String fDate = String.format(Locale.ROOT, "\"createdAt\":\"2026-03-%02d\"", day);
+        String fDesc = "\"description\":\"" + desc + "\"";
+
+        if (order == 1) {
+            return String.format(Locale.ROOT, "{\"_dataset\":\"SYNTHETIC\",%s,%s,%s,%s,%s,%s,%s,%s,%s}",
+                    fId, fCat, fName, fPrice, fRating, fStock, fTags, fDesc, fDate);
+        } else if (order == 2) {
+            return String.format(Locale.ROOT, "{\"_dataset\":\"SYNTHETIC\",%s,%s,%s,%s,%s,%s,%s,%s,%s}",
+                    fName, fId, fPrice, fStock, fCat, fRating, fDate, fTags, fDesc);
+        } else {
+            return String.format(Locale.ROOT, "{\"_dataset\":\"SYNTHETIC\",%s,%s,%s,%s,%s,%s,%s,%s,%s}",
+                    fId, fName, fCat, fPrice, fStock, fRating, fTags, fDate, fDesc);
+        }
+    }
+
+    public static String generateShapeBJson(int id, Random rand) {
+        String department = CATEGORIES[rand.nextInt(CATEGORIES.length)];
+        double price = 10.0 + (rand.nextDouble() * 490.0);
+        boolean discountEligible = rand.nextBoolean();
+        boolean available = rand.nextDouble() > 0.25;
+        int hub = 1 + rand.nextInt(8);
+        double customerScore = 3.0 + rand.nextInt(21) * 0.1;
+        int day = 1 + rand.nextInt(28);
+
+        int labelCount = 1 + rand.nextInt(4);
+        StringBuilder labelsJson = new StringBuilder("[");
+        for (int t = 0; t < labelCount; t++) {
+            if (t > 0) labelsJson.append(",");
+            labelsJson.append("\"").append(TAGS_POOL[rand.nextInt(TAGS_POOL.length)]).append("\"");
+        }
+        labelsJson.append("]");
+
+        char series = (char) ('A' + rand.nextInt(6));
+        boolean warranty = rand.nextBoolean();
+
+        int order = rand.nextInt(3);
+        String fId = "\"item_id\":" + id;
+        String fTitle = "\"title\":\"Product-" + id + "-" + String.format(Locale.ROOT, "%03d", rand.nextInt(1000)) + "\"";
+        String fDept = "\"department\":\"" + department + "\"";
+        String fPricing = String.format(Locale.ROOT, "\"pricing\":{\"amount\":%.2f,\"currency\":\"USD\",\"discount_eligible\":%b}", price, discountEligible);
+        String fInv = String.format(Locale.ROOT, "\"inventory\":{\"available\":%b,\"fulfillment_hub\":\"WH-ZONE-%d\"}", available, hub);
+        String fScore = String.format(Locale.ROOT, "\"customer_score\":%.1f", customerScore);
+        String fLabels = "\"labels\":" + labelsJson;
+        String fDate = String.format(Locale.ROOT, "\"registered_date\":\"2026-04-%02d\"", day);
+        String fSpecs = String.format(Locale.ROOT, "\"specs\":{\"model_series\":\"SERIES-%c\",\"extended_warranty\":%b}", series, warranty);
+
+        if (order == 1) {
+            return String.format(Locale.ROOT, "{\"_dataset\":\"SYNTHETIC\",%s,%s,%s,%s,%s,%s,%s,%s,%s}",
+                    fId, fDept, fTitle, fPricing, fScore, fInv, fLabels, fSpecs, fDate);
+        } else if (order == 2) {
+            return String.format(Locale.ROOT, "{\"_dataset\":\"SYNTHETIC\",%s,%s,%s,%s,%s,%s,%s,%s,%s}",
+                    fTitle, fId, fPricing, fInv, fDept, fScore, fDate, fLabels, fSpecs);
+        } else {
+            return String.format(Locale.ROOT, "{\"_dataset\":\"SYNTHETIC\",%s,%s,%s,%s,%s,%s,%s,%s,%s}",
+                    fId, fTitle, fDept, fPricing, fInv, fScore, fLabels, fDate, fSpecs);
+        }
+    }
+
+    public static String generateGradualJson(int id, Random rand, double progress) {
+        int stage = (int) Math.floor(progress * 10.0);
+
+        // Field 1: id vs item_id
+        String idField = stage >= 1 ? "\"item_id\":" + id : "\"id\":" + id;
+
+        // Field 2: name vs title
+        String nameField = stage >= 2 ?
+                "\"title\":\"Product-" + id + "-" + String.format(Locale.ROOT, "%03d", rand.nextInt(1000)) + "\"" :
+                "\"name\":\"Product-" + id + "-" + String.format(Locale.ROOT, "%03d", rand.nextInt(1000)) + "\"";
+
+        // Field 3: category vs department
+        String catVal = CATEGORIES[rand.nextInt(CATEGORIES.length)];
+        String catField = stage >= 3 ? "\"department\":\"" + catVal + "\"" : "\"category\":\"" + catVal + "\"";
+
+        // Field 4: rating vs customer_score
+        double ratingVal = 3.0 + rand.nextInt(21) * 0.1;
+        String ratingField = stage >= 4 ? String.format(Locale.ROOT, "\"customer_score\":%.1f", ratingVal) : String.format(Locale.ROOT, "\"rating\":%.1f", ratingVal);
+
+        // Field 5: tags vs labels
+        int tagCount = 1 + rand.nextInt(4);
+        StringBuilder tagsJson = new StringBuilder("[");
+        for (int t = 0; t < tagCount; t++) {
+            if (t > 0) tagsJson.append(",");
+            tagsJson.append("\"").append(TAGS_POOL[rand.nextInt(TAGS_POOL.length)]).append("\"");
+        }
+        tagsJson.append("]");
+        String tagsField = stage >= 5 ? "\"labels\":" + tagsJson : "\"tags\":" + tagsJson;
+
+        // Field 6: createdAt vs registered_date
+        int day = 1 + rand.nextInt(28);
+        String dateField = stage >= 6 ?
+                String.format(Locale.ROOT, "\"registered_date\":\"2026-04-%02d\"", day) :
+                String.format(Locale.ROOT, "\"createdAt\":\"2026-03-%02d\"", day);
+
+        // Field 7: price (flat) vs pricing (nested)
+        double priceVal = 10.0 + (rand.nextDouble() * 490.0);
+        String priceField = stage >= 7 ?
+                String.format(Locale.ROOT, "\"pricing\":{\"amount\":%.2f,\"currency\":\"USD\",\"discount_eligible\":%b}", priceVal, rand.nextBoolean()) :
+                String.format(Locale.ROOT, "\"price\":%.2f", priceVal);
+
+        // Field 8: inStock (flat) vs inventory (nested)
+        boolean stockVal = rand.nextDouble() > 0.25;
+        String stockField = stage >= 8 ?
+                String.format(Locale.ROOT, "\"inventory\":{\"available\":%b,\"fulfillment_hub\":\"WH-ZONE-%d\"}", stockVal, 1 + rand.nextInt(8)) :
+                String.format(Locale.ROOT, "\"inStock\":%b", stockVal);
+
+        // Field 9: description (flat) vs specs (nested)
+        String descField = stage >= 9 ?
+                String.format(Locale.ROOT, "\"specs\":{\"model_series\":\"SERIES-%c\",\"extended_warranty\":%b}", (char) ('A' + rand.nextInt(6)), rand.nextBoolean()) :
+                String.format(Locale.ROOT, "\"description\":\"High performance %s merchandise item designed for reliability with %s warranty protection.\"", catVal, rand.nextBoolean() ? "standard" : "extended");
+
+        return String.format(Locale.ROOT,
+                "{\"_dataset\":\"SYNTHETIC\",%s,%s,%s,%s,%s,%s,%s,%s,%s}",
+                idField, nameField, catField, priceField, stockField, ratingField, tagsField, dateField, descField
         );
     }
 
     public static String generateNoisyShapeAJson(int id, Random rand) {
-        String category = (id % 2 == 0) ? "electronics" : "appliances";
-        double price = (id * 19.99) % 500 + 10.0;
-        boolean inStock = (id % 3 != 0);
+        String category = CATEGORIES[rand.nextInt(CATEGORIES.length)];
+        double price = 10.0 + (rand.nextDouble() * 490.0);
+        boolean inStock = rand.nextDouble() > 0.25;
         double rating = 3.5 + (rand.nextInt(15)) * 0.1;
-        int day = (id % 28) + 1;
+        int day = 1 + rand.nextInt(28);
 
         // Varying tags length: 1 to 5 tags
         int tagCount = 1 + rand.nextInt(5);
-        String[] possibleTags = {"new", "popular", "sale", "clearance", "featured", "refurbished", "promo"};
         StringBuilder tagsJson = new StringBuilder("[");
         for (int t = 0; t < tagCount; t++) {
             if (t > 0) tagsJson.append(",");
-            tagsJson.append("\"").append(possibleTags[(id + t) % possibleTags.length]).append("\"");
+            tagsJson.append("\"").append(TAGS_POOL[(id + t) % TAGS_POOL.length]).append("\"");
         }
         tagsJson.append("]");
 
@@ -1211,17 +1431,9 @@ public class DriftBench {
             tagsJson = new StringBuilder("[\"outlier\",\"enterprise\",\"bulk\",\"special\",\"certified\",\"heavy-duty\"]");
         }
 
-        return String.format(
+        return String.format(Locale.ROOT,
                 "{\"_dataset\":\"SYNTHETIC\",\"id\":%d,\"name\":\"Product-%d\",\"category\":\"%s\",\"price\":%.2f,\"inStock\":%b,\"rating\":%.1f,\"tags\":%s,\"createdAt\":\"2026-03-%02d\",\"description\":\"%s\"}",
                 id, id, category, price, inStock, rating, tagsJson, day, descBuilder
-        );
-    }
-
-    public static String generateShapeBJson(int id, Random rand) {
-        return String.format(
-                "{\"_dataset\":\"SYNTHETIC\",\"item_id\":%d,\"title\":\"Product-%d\",\"department\":\"%s\",\"pricing\":{\"amount\":%.2f,\"currency\":\"USD\",\"discount_eligible\":%b},\"inventory\":{\"available\":%b,\"fulfillment_hub\":\"WH-ZONE-%d\"},\"customer_score\":%.1f,\"labels\":[\"%s\",\"%s\"],\"registered_date\":\"2026-04-%02d\",\"specs\":{\"model_series\":\"SERIES-X\",\"extended_warranty\":true}}",
-                id, id, (id % 2 == 0 ? "electronics" : "appliances"), (id * 19.99) % 500 + 10.0, (id % 4 == 0), (id % 3 != 0), (id % 5) + 1,
-                3.5 + (id % 15) * 0.1, (id % 2 == 0 ? "new" : "popular"), "sale", (id % 28) + 1
         );
     }
 
@@ -1231,12 +1443,12 @@ public class DriftBench {
 
         Random rA = new Random(42);
         for (int i = 1; i <= countA; i++) {
-            Files.writeString(dirA.resolve(String.format("%06d.json", i)), generateShapeAJson(i, rA), StandardCharsets.UTF_8);
+            Files.writeString(dirA.resolve(String.format(Locale.ROOT, "%06d.json", i)), generateShapeAJson(i, rA), StandardCharsets.UTF_8);
         }
 
         Random rB = new Random(84);
         for (int i = 1; i <= countB; i++) {
-            Files.writeString(dirB.resolve(String.format("%06d.json", i)), generateShapeBJson(i, rB), StandardCharsets.UTF_8);
+            Files.writeString(dirB.resolve(String.format(Locale.ROOT, "%06d.json", i)), generateShapeBJson(i, rB), StandardCharsets.UTF_8);
         }
     }
 
@@ -1288,17 +1500,17 @@ public class DriftBench {
         System.out.println("Notice: All compression ratios are total-bytes based (sum(originalBytes) / sum(compressedBytes)).\n");
 
         System.out.println("1. Canonical Run (Switch Point #600):");
-        System.out.printf("   Shape Switch Point:         Payload #%d (Shape A: %d, Shape B: %d)%n",
+        System.out.printf(Locale.ROOT, "   Shape Switch Point:         Payload #%d (Shape A: %d, Shape B: %d)%n",
                 r.shapeSwitchPoint, r.countA, r.countB);
         if (r.payloadsElapsedToDetection >= 0) {
-            System.out.printf("   Drift Detection Point:      Payload #%d (%d payloads elapsed after shape switch)%n",
+            System.out.printf(Locale.ROOT, "   Drift Detection Point:      Payload #%d (%d payloads elapsed after shape switch)%n",
                     r.driftDetectedAt, r.payloadsElapsedToDetection);
         }
-        System.out.printf("   Dictionary Switch Points:   Adaptive-200: %s | Adaptive-100: [%d]%n",
+        System.out.printf(Locale.ROOT, "   Dictionary Switch Points:   Adaptive-200: %s | Adaptive-100: [%d]%n",
                 r.driftRetrainPayloadIndices, r.adaptive100.retrainDeployedAt);
-        System.out.printf("   Evaluation Window:          %d payloads | Threshold: < %.2f * baseline%n",
+        System.out.printf(Locale.ROOT, "   Evaluation Window:          %d payloads | Threshold: < %.2f * baseline%n",
                 r.driftEvalWindow, r.driftThreshold);
-        System.out.printf("   Reporting Window:           %d payloads%n%n", r.reportingWindowSize);
+        System.out.printf(Locale.ROOT, "   Reporting Window:           %d payloads%n%n", r.reportingWindowSize);
 
         System.out.println("   Strategy                         Total Bytes   Mean Ratio   Retrains   Post-Switch 100 Ratio   Train Time   Recovery");
         System.out.println("   ------------------------------------------------------------------------------------------------------------------");
@@ -1312,11 +1524,11 @@ public class DriftBench {
 
         if (r.matrixResult != null && !r.matrixResult.pointStrategyStats.isEmpty()) {
             System.out.println("2. Sensitivity Matrix: One Row Per (Strategy, Switch Point) Across 5 Seeds:");
-            System.out.printf("   %-28s %-12s %-25s %-16s %-25s %-16s%n",
+            System.out.printf(Locale.ROOT, "   %-28s %-12s %-25s %-16s %-25s %-16s%n",
                     "Strategy", "Switch Point", "Total Bytes (mean)", "Retrains (mean)", "Post-Switch 100 (mean)", "Train Time (mean)");
             System.out.println("   ---------------------------------------------------------------------------------------------------------------------------------");
             for (SwitchPointStrategyStats stat : r.matrixResult.pointStrategyStats) {
-                System.out.printf("   %-28s #%-11d %-25s %-16s %-25s %-16s%n",
+                System.out.printf(Locale.ROOT, "   %-28s #%-11d %-25s %-16s %-25s %-16s%n",
                         stat.strategyName,
                         stat.switchPoint,
                         stat.totalBytes.format("%,.0f B"),
@@ -1329,30 +1541,52 @@ public class DriftBench {
             if (!r.matrixResult.zeroRetrainCases.isEmpty()) {
                 System.out.println("3. Missed-Drift Cases (Adaptive Runs with 0 Retrains):");
                 for (ZeroRetrainCase zc : r.matrixResult.zeroRetrainCases) {
-                    System.out.printf("   [MISSED-DRIFT] %-28s | Switch: #%d | Seed: %-4d | Detected: #%d (%d elapsed) | Left After Detection: %d payloads (< %d needed)%n",
+                    System.out.printf(Locale.ROOT, "   [MISSED-DRIFT] %-28s | Switch: #%d | Seed: %-4d | Detected: #%d (%d elapsed) | Left After Detection: %d payloads (< %d needed)%n",
                             zc.strategyName, zc.switchPoint, zc.seed, zc.driftDetectedAt, zc.payloadsElapsed, zc.payloadsLeftAfterDetection, zc.bufferNeeded);
                 }
                 System.out.println();
             }
         }
 
+        if (r.gradualResult != null) {
+            System.out.println("4. Gradual-Drift Stream Verification (400-Payload Transition: #300 -> #700):");
+            System.out.printf(Locale.ROOT, "   %-28s %-20s %-14s %-24s %-10s %-12s %-10s %-12s%n",
+                    "Strategy", "Detected Drift?", "Detected At", "Into Transition", "Retrains", "Total Bytes", "Mean Ratio", "Train Time");
+            System.out.println("   ------------------------------------------------------------------------------------------------------------------------------------------");
+            for (StrategyResult s : r.gradualResult.strategies) {
+                String detected = "No";
+                String detectedAt = "-";
+                String elapsed = "-";
+                if (s.name.contains("Fixed-schedule")) {
+                    detected = "No (blind schedule)";
+                } else if (s.name.contains("Adaptive") && s.driftDetectedAt > 0) {
+                    detected = "Yes";
+                    detectedAt = "#" + s.driftDetectedAt;
+                    elapsed = (s.driftDetectedAt - r.gradualResult.transitionStart) + " payloads";
+                }
+                System.out.printf(Locale.ROOT, "   %-28s %-20s %-14s %-24s %-10d %,10d B %9.2fx %10d ms%n",
+                        s.name, detected, detectedAt, elapsed, s.retrainCount, s.totalBytes, s.overallRatio, s.trainingTimeMs);
+            }
+            System.out.println("   ------------------------------------------------------------------------------------------------------------------------------------------\n");
+        }
+
         if (r.noDriftResult != null) {
-            System.out.println("4. Clean No-Drift Stream Verification (Shape A only, 1,000 Payloads):");
-            System.out.printf("   %-28s %12s %11s %10s %14s%n", "Strategy", "Total Bytes", "Mean Ratio", "Retrains", "Train Time");
+            System.out.println("5. Clean No-Drift Stream Verification (Shape A only, 1,000 Payloads):");
+            System.out.printf(Locale.ROOT, "   %-28s %12s %11s %10s %14s%n", "Strategy", "Total Bytes", "Mean Ratio", "Retrains", "Train Time");
             System.out.println("   ----------------------------------------------------------------------------------");
             for (StrategyResult s : r.noDriftResult.strategies) {
-                System.out.printf("   %-28s %,10d B %10.2fx %10d %11d ms%n",
+                System.out.printf(Locale.ROOT, "   %-28s %,10d B %10.2fx %10d %11d ms%n",
                         s.name, s.totalBytes, s.overallRatio, s.retrainCount, s.trainingTimeMs);
             }
             System.out.println("   ----------------------------------------------------------------------------------\n");
         }
 
         if (r.noisyResult != null) {
-            System.out.println("5. Noisy-Stationary Stream Verification (Shape A varying + outliers, 1,000 Payloads):");
-            System.out.printf("   %-28s %12s %11s %10s %14s %14s%n", "Strategy", "Total Bytes", "Mean Ratio", "Retrains", "False Alarms", "Train Time");
+            System.out.println("6. Noisy-Stationary Stream Verification (Shape A varying + outliers, 1,000 Payloads):");
+            System.out.printf(Locale.ROOT, "   %-28s %12s %11s %10s %14s %14s%n", "Strategy", "Total Bytes", "Mean Ratio", "Retrains", "False Alarms", "Train Time");
             System.out.println("   -------------------------------------------------------------------------------------------------");
             for (StrategyResult s : r.noisyResult.strategies) {
-                System.out.printf("   %-28s %,10d B %10.2fx %10d %14d %11d ms%n",
+                System.out.printf(Locale.ROOT, "   %-28s %,10d B %10.2fx %10d %14d %11d ms%n",
                         s.name, s.totalBytes, s.overallRatio, s.retrainCount, s.falseAlarmCount, s.trainingTimeMs);
             }
             System.out.println("   -------------------------------------------------------------------------------------------------\n");
@@ -1363,7 +1597,7 @@ public class DriftBench {
 
     private static void printStrategyConsoleRow(StrategyResult s) {
         String rec = s.timeToRecovery >= 0 ? s.timeToRecovery + " payloads" : "-";
-        System.out.printf("   %-30s %,10d B %10.2fx %10d %21.2fx %9d ms %12s%n",
+        System.out.printf(Locale.ROOT, "   %-30s %,10d B %10.2fx %10d %21.2fx %9d ms %12s%n",
                 s.name, s.totalBytes, s.overallRatio, s.retrainCount, s.postSwitch100Ratio, s.trainingTimeMs, rec);
     }
 }
