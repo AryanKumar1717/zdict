@@ -12,34 +12,34 @@
   <line x1="60" y1="340" x2="680" y2="340" stroke="#edf2f7" stroke-width="1"/>
   <text x="50" y="344" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">0.0x</text>
   <line x1="60" y1="288" x2="680" y2="288" stroke="#edf2f7" stroke-width="1"/>
-  <text x="50" y="292" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">8.0x</text>
+  <text x="50" y="292" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">2.0x</text>
   <line x1="60" y1="236" x2="680" y2="236" stroke="#edf2f7" stroke-width="1"/>
-  <text x="50" y="240" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">16.0x</text>
+  <text x="50" y="240" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">4.0x</text>
   <line x1="60" y1="184" x2="680" y2="184" stroke="#edf2f7" stroke-width="1"/>
-  <text x="50" y="188" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">24.0x</text>
+  <text x="50" y="188" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">6.0x</text>
   <line x1="60" y1="132" x2="680" y2="132" stroke="#edf2f7" stroke-width="1"/>
-  <text x="50" y="136" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">32.0x</text>
+  <text x="50" y="136" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">8.0x</text>
   <line x1="60" y1="80" x2="680" y2="80" stroke="#edf2f7" stroke-width="1"/>
-  <text x="50" y="84" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">40.0x</text>
-  <rect x="133" y="115" width="26" height="225" rx="3" fill="#718096"/>
-  <text x="146" y="111" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">34.5</text>
-  <rect x="163" y="127" width="26" height="213" rx="3" fill="#3182ce"/>
-  <text x="176" y="123" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">32.7</text>
-  <rect x="193" y="118" width="26" height="222" rx="3" fill="#38a169"/>
-  <text x="206" y="114" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">34.1</text>
-  <text x="176" y="360" font-family="system-ui, sans-serif" font-size="11" font-weight="500" fill="#4a5568" text-anchor="middle">pokemon</text>
-  <rect x="326" y="308" width="26" height="32" rx="3" fill="#718096"/>
-  <text x="339" y="304" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">4.98</text>
-  <rect x="356" y="309" width="26" height="31" rx="3" fill="#3182ce"/>
-  <text x="369" y="305" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">4.72</text>
-  <rect x="386" y="304" width="26" height="36" rx="3" fill="#38a169"/>
-  <text x="399" y="300" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">5.54</text>
-  <text x="369" y="360" font-family="system-ui, sans-serif" font-size="11" font-weight="500" fill="#4a5568" text-anchor="middle">species</text>
-  <rect x="519" y="200" width="26" height="140" rx="3" fill="#718096"/>
-  <text x="532" y="196" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">21.5</text>
-  <rect x="549" y="208" width="26" height="132" rx="3" fill="#3182ce"/>
-  <text x="562" y="204" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">20.4</text>
-  <rect x="579" y="195" width="26" height="145" rx="3" fill="#38a169"/>
-  <text x="592" y="191" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">22.3</text>
+  <text x="50" y="84" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">10.0x</text>
+  <rect x="133" y="266" width="26" height="74" rx="3" fill="#718096"/>
+  <text x="146" y="262" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">2.85</text>
+  <rect x="163" y="267" width="26" height="73" rx="3" fill="#3182ce"/>
+  <text x="176" y="263" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">2.82</text>
+  <rect x="193" y="129" width="26" height="211" rx="3" fill="#38a169"/>
+  <text x="206" y="125" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">8.11</text>
+  <text x="176" y="360" font-family="system-ui, sans-serif" font-size="11" font-weight="500" fill="#4a5568" text-anchor="middle">forecast</text>
+  <rect x="326" y="263" width="26" height="77" rx="3" fill="#718096"/>
+  <text x="339" y="259" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">2.98</text>
+  <rect x="356" y="263" width="26" height="77" rx="3" fill="#3182ce"/>
+  <text x="369" y="259" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">2.95</text>
+  <rect x="386" y="236" width="26" height="104" rx="3" fill="#38a169"/>
+  <text x="399" y="232" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">4.01</text>
+  <text x="369" y="360" font-family="system-ui, sans-serif" font-size="11" font-weight="500" fill="#4a5568" text-anchor="middle">geocoding</text>
+  <rect x="519" y="264" width="26" height="76" rx="3" fill="#718096"/>
+  <text x="532" y="260" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">2.92</text>
+  <rect x="549" y="265" width="26" height="75" rx="3" fill="#3182ce"/>
+  <text x="562" y="261" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">2.89</text>
+  <rect x="579" y="207" width="26" height="133" rx="3" fill="#38a169"/>
+  <text x="592" y="203" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#2d3748" text-anchor="middle">5.11</text>
   <text x="562" y="360" font-family="system-ui, sans-serif" font-size="11" font-weight="500" fill="#4a5568" text-anchor="middle">ALL_GROUPS_T..</text>
 </svg>

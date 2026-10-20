@@ -81,6 +81,7 @@ public class ReplayBench {
         public List<BucketStats> buckets = new ArrayList<>();
         public Double avgBytesSavedVsGzip;
         public Integer breakEvenPayloads;
+        public double avgPayloadBytes;
     }
 
     public static class SuiteResult {
@@ -98,18 +99,26 @@ public class ReplayBench {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 1) {
-            System.err.println("Usage: java dev.zdict.ReplayBench <samples-dir> [output-dir]");
+            System.err.println("Usage: java dev.zdict.ReplayBench <samples-dir> [output-dir] [group-filter]");
             System.exit(1);
         }
 
         Path samplesDir = Path.of(args[0]);
         Path outputDir = args.length >= 2 ? Path.of(args[1]) : Path.of("benchmark-results");
+        Set<String> filterGroups = null;
+        if (args.length >= 3 && !args[2].isBlank()) {
+            filterGroups = new HashSet<>(Arrays.asList(args[2].split(",")));
+        }
 
-        SuiteResult result = run(samplesDir, outputDir, DEFAULT_MIN_PAYLOADS);
+        SuiteResult result = run(samplesDir, outputDir, DEFAULT_MIN_PAYLOADS, filterGroups);
         printConsoleSummary(result);
     }
 
     public static SuiteResult run(Path samplesDir, Path outputDir, int minPayloads) throws Exception {
+        return run(samplesDir, outputDir, minPayloads, null);
+    }
+
+    public static SuiteResult run(Path samplesDir, Path outputDir, int minPayloads, Set<String> filterGroups) throws Exception {
         if (!Files.isDirectory(samplesDir)) {
             throw new IllegalArgumentException("Samples directory not found: " + samplesDir);
         }
@@ -132,6 +141,13 @@ public class ReplayBench {
                     groupDirs = List.of(samplesDir);
                 }
             }
+        }
+
+        if (filterGroups != null && !filterGroups.isEmpty()) {
+            Set<String> fg = filterGroups;
+            groupDirs = groupDirs.stream()
+                    .filter(d -> fg.contains(d.getFileName().toString()))
+                    .toList();
         }
 
         for (Path gDir : groupDirs) {
@@ -195,6 +211,7 @@ public class ReplayBench {
         List<byte[]> testSet = payloads.subList(trainCount, totalCount);
 
         long totalOrigBytes = testSet.stream().mapToLong(p -> p.length).sum();
+        long totalAllBytes = payloads.stream().mapToLong(p -> p.length).sum();
 
         // 1. Train 16 KB dictionary on trainSet (first 2/3)
         long trainBytesSum = trainSet.stream().mapToLong(p -> p.length).sum();
@@ -293,6 +310,7 @@ public class ReplayBench {
         gr.trainPayloads = trainCount;
         gr.testPayloads = testCount;
         gr.originalBytes = totalOrigBytes;
+        gr.avgPayloadBytes = totalCount > 0 ? (double) totalAllBytes / totalCount : 0.0;
         gr.dictionarySizeBytes = dictBytes.length;
 
         gr.gzip = new CodecResult("gzip (level 6)", totalOrigBytes, gzipBytes, gzP50, gzP99);
@@ -372,13 +390,16 @@ public class ReplayBench {
     private static GroupResult computeOverall(List<GroupResult> groups) {
         GroupResult o = new GroupResult();
         o.group = "ALL_GROUPS_TOTAL";
+        long totalAllBytes = 0;
         for (GroupResult g : groups) {
             o.totalPayloads += g.totalPayloads;
             o.trainPayloads += g.trainPayloads;
             o.testPayloads += g.testPayloads;
             o.originalBytes += g.originalBytes;
             o.dictionarySizeBytes += g.dictionarySizeBytes;
+            totalAllBytes += Math.round(g.avgPayloadBytes * g.totalPayloads);
         }
+        o.avgPayloadBytes = o.totalPayloads > 0 ? (double) totalAllBytes / o.totalPayloads : 0.0;
 
         long totalGz = groups.stream().mapToLong(g -> g.gzip.compressedBytes).sum();
         long totalZstd = groups.stream().mapToLong(g -> g.zstd.compressedBytes).sum();
@@ -420,11 +441,6 @@ public class ReplayBench {
         sb.append("- **OS**: `").append(suite.os).append("`\n");
         sb.append("- **Note**: *").append(suite.timingNotice).append("*\n\n");
 
-        sb.append("## Overall Summary\n\n");
-        if (suite.overall != null) {
-            appendGroupMarkdown(sb, suite.overall);
-        }
-
         sb.append("## Per-Group Results\n\n");
         for (GroupResult gr : suite.groups) {
             sb.append("### Group: `").append(gr.group).append("`\n\n");
@@ -437,6 +453,7 @@ public class ReplayBench {
     private static void appendGroupMarkdown(StringBuilder sb, GroupResult gr) {
         sb.append(String.format("- Total Payloads: **%d** (Train: %d, Test: %d)\n",
                 gr.totalPayloads, gr.trainPayloads, gr.testPayloads));
+        sb.append(String.format("- Average Payload Size: **%,d B**\n", Math.round(gr.avgPayloadBytes)));
         sb.append(String.format("- Uncompressed Test Bytes: **%,d B**\n", gr.originalBytes));
         if (gr.dictionarySizeBytes > 0) {
             sb.append(String.format("- Dictionary Size: **%,d B**\n", gr.dictionarySizeBytes));
@@ -686,7 +703,8 @@ public class ReplayBench {
         System.out.println("\n=== Replay Benchmark Summary ===");
         System.out.println("Date: " + suite.date);
         for (GroupResult gr : suite.groups) {
-            System.out.printf("Group: %-25s | Test: %,d payloads (%,d B)%n", gr.group, gr.testPayloads, gr.originalBytes);
+            System.out.printf("Group: %-25s | Total: %,d payloads | Avg Size: %,d B | Test: %,d payloads (%,d B)%n",
+                    gr.group, gr.totalPayloads, Math.round(gr.avgPayloadBytes), gr.testPayloads, gr.originalBytes);
             System.out.printf("  gzip (lvl 6):       %,10d B | %5.2fx ratio | p50: %6.1f µs%n",
                     gr.gzip.compressedBytes, gr.gzip.ratio, gr.gzip.p50Micros);
             System.out.printf("  zstd (lvl 3):       %,10d B | %5.2fx ratio | p50: %6.1f µs%n",
