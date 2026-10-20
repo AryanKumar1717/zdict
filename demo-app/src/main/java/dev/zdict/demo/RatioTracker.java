@@ -57,7 +57,15 @@ public class RatioTracker {
             return;
         }
         double ratio = (double) origBytes / compBytes;
-        recordSuccess(group, dictId, ratio);
+        GroupRatioStats gs = getGroupStats(group);
+        double mean;
+        synchronized (gs) {
+            gs.recordSuccess(dictId, ratio, origBytes, compBytes);
+            mean = gs.getRollingMean(dictId);
+        }
+        if (metrics != null) {
+            metrics.updateRollingRatio(group, mean);
+        }
     }
 
     public void recordSuccess(String group, String dictId, double ratio) {
@@ -164,6 +172,38 @@ public class RatioTracker {
         }
     }
 
+    public long getTotalBytesOriginal(String group) {
+        if (group == null) return 0;
+        GroupRatioStats gs = getGroupStats(group);
+        synchronized (gs) {
+            return gs.getTotalBytesOriginal();
+        }
+    }
+
+    public long getTotalBytesCompressed(String group) {
+        if (group == null) return 0;
+        GroupRatioStats gs = getGroupStats(group);
+        synchronized (gs) {
+            return gs.getTotalBytesCompressed();
+        }
+    }
+
+    public long getTotalBytesSaved(String group) {
+        if (group == null) return 0;
+        GroupRatioStats gs = getGroupStats(group);
+        synchronized (gs) {
+            return gs.getTotalBytesSaved();
+        }
+    }
+
+    public long getCompressedResponses(String group) {
+        if (group == null) return 0;
+        GroupRatioStats gs = getGroupStats(group);
+        synchronized (gs) {
+            return gs.getCompressedResponses();
+        }
+    }
+
     public Clock getClock() {
         return clock;
     }
@@ -171,6 +211,9 @@ public class RatioTracker {
     static class GroupRatioStats {
         private final int windowCapacity;
         private final Map<String, DictWindow> windows = new HashMap<>();
+        private long totalBytesOriginal = 0;
+        private long totalBytesCompressed = 0;
+        private long compressedResponses = 0;
 
         GroupRatioStats(int windowCapacity) {
             this.windowCapacity = windowCapacity > 0 ? windowCapacity : 500;
@@ -180,8 +223,33 @@ public class RatioTracker {
             return windows.computeIfAbsent(dictId, k -> new DictWindow(windowCapacity));
         }
 
-        void recordSuccess(String dictId, double ratio) {
+        void recordSuccess(String dictId, double ratio, long origBytes, long compBytes) {
             getOrCreate(dictId).recordSuccess(ratio);
+            if (origBytes > 0 && compBytes > 0) {
+                totalBytesOriginal += origBytes;
+                totalBytesCompressed += compBytes;
+                compressedResponses++;
+            }
+        }
+
+        void recordSuccess(String dictId, double ratio) {
+            recordSuccess(dictId, ratio, 0, 0);
+        }
+
+        long getTotalBytesOriginal() {
+            return totalBytesOriginal;
+        }
+
+        long getTotalBytesCompressed() {
+            return totalBytesCompressed;
+        }
+
+        long getTotalBytesSaved() {
+            return Math.max(0, totalBytesOriginal - totalBytesCompressed);
+        }
+
+        long getCompressedResponses() {
+            return compressedResponses;
         }
 
         void recordFailure(String dictId) {

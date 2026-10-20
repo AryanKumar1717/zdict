@@ -92,9 +92,24 @@ public class ZdictTrainController {
                 status = "HEALTHY";
             }
 
-            list.add(new GroupStatus(group, activeId, canaryId, baselineRatio, rollingRatio, status, sampleCount, lastTrainedTime, lastEvent));
+            GroupStatus gs = new GroupStatus(group, activeId, canaryId, baselineRatio, rollingRatio, status, sampleCount, lastTrainedTime, lastEvent);
+            if (ratioTracker != null) {
+                gs.setBytesOriginal(ratioTracker.getTotalBytesOriginal(group));
+                gs.setBytesCompressed(ratioTracker.getTotalBytesCompressed(group));
+                gs.setBytesSaved(ratioTracker.getTotalBytesSaved(group));
+                gs.setCompressedResponses(ratioTracker.getCompressedResponses(group));
+            }
+            list.add(gs);
         }
 
         return ResponseEntity.ok(list);
+    }
+
+    @GetMapping("/events")
+    public ResponseEntity<List<ZdictEvent>> getEvents() {
+        if (eventLog == null) {
+            return ResponseEntity.ok(Collections.emptyList());
+        }
+        return ResponseEntity.ok(eventLog.getRecentEvents());
     }
 }

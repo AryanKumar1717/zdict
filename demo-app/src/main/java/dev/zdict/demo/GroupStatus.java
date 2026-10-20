@@ -17,6 +17,10 @@ public class GroupStatus {
     private int sampleCount;
     private String lastTrainedTime;
     private ZdictEvent lastEvent;
+    private long bytesOriginal;
+    private long bytesCompressed;
+    private long bytesSaved;
+    private long compressedResponses;
 
     public GroupStatus() {
     }
@@ -105,5 +109,37 @@ public class GroupStatus {
 
     public void setLastEvent(ZdictEvent lastEvent) {
         this.lastEvent = lastEvent;
+    }
+
+    public long getBytesOriginal() {
+        return bytesOriginal;
+    }
+
+    public void setBytesOriginal(long bytesOriginal) {
+        this.bytesOriginal = bytesOriginal;
+    }
+
+    public long getBytesCompressed() {
+        return bytesCompressed;
+    }
+
+    public void setBytesCompressed(long bytesCompressed) {
+        this.bytesCompressed = bytesCompressed;
+    }
+
+    public long getBytesSaved() {
+        return bytesSaved;
+    }
+
+    public void setBytesSaved(long bytesSaved) {
+        this.bytesSaved = bytesSaved;
+    }
+
+    public long getCompressedResponses() {
+        return compressedResponses;
+    }
+
+    public void setCompressedResponses(long compressedResponses) {
+        this.compressedResponses = compressedResponses;
     }
 }

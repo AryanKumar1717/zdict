@@ -32,6 +32,19 @@ public class ZdictProperties {
     private Drift drift = new Drift();
     private AutoLearning autoLearning = new AutoLearning();
     private Canary canary = new Canary();
+    private Dashboard dashboard = new Dashboard();
+
+    public static class Dashboard {
+        private boolean enabled = false;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+    }
 
     public static class Sample {
         private int perGroupMax = 2000;
@@ -270,5 +283,17 @@ public class ZdictProperties {
 
     public void setCanary(Canary canary) {
         this.canary = canary;
+    }
+
+    public Dashboard getDashboard() {
+        return dashboard;
+    }
+
+    public void setDashboard(Dashboard dashboard) {
+        this.dashboard = dashboard;
+    }
+
+    public boolean isDashboardEnabled() {
+        return dashboard != null && dashboard.isEnabled();
     }
 }
