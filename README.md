@@ -150,19 +150,25 @@ The `zdict.responses` counter includes the reason tag for visibility into gating
 
 ---
 
-### 4. Schema Drift Benchmark: Static vs Adaptive
+### 4. Schema Drift Benchmark: 4-Strategy Comparison
 
 ![Schema Drift](benchmark-results/drift.svg)
 
 Simulates continuous traffic across 1,000 payloads: first 60% with Schema A (legacy schema), followed by 40% Schema B (renamed fields and nested structures).
 
-| Strategy | Total Compressed Size | Overall Ratio | Savings vs gzip | Behavioral Note |
-|---|---|---|---|---|
-| **gzip (level 6)** | 254,783 B | **1.24x** | Baseline | Consistent, but low compression for repetitive JSON |
-| **Static zstd+dict** | 135,008 B | **2.34x** | 47.0% | Excellent on Shape A (~7-9x), collapses to 1.27x on Shape B |
-| **Adaptive zdict** | **89,920 B** | **3.52x** | **64.7%** | Detects drift at payload #607, retrains fresh dictionary, recovers ratio to 8.72x |
+- **Shape Switch Point**: Payload **#600**
+- **Drift Detected At**: Payload **#608** (**8 payloads elapsed** after shape switch)
+- **Dictionary Switch Point**: Payload **#808** (retrained on ONLY 200 fresh post-drift payloads)
+- **Evaluation Window**: 200 payloads | **Threshold**: `rolling mean < 0.85 * baseline`
 
-> **Adaptive Savings**: Adaptive zdict saved **45,088 bytes (33.4% reduction)** compared to static dictionary compression over the same 1,000-payload stream.
+| Strategy | Total Compressed Size | Mean Ratio | Retrain Count | Post-Switch 100 Ratio | Behavioral Note |
+|---|---|---|---|---|---|
+| **gzip (level 6)** | 254,783 B | **1.24x** | 0 | 1.28x | Consistent, but low compression for repetitive JSON |
+| **Static zstd+dict** | 135,008 B | **2.34x** | 0 | 1.30x | Excellent on Shape A (~7-9x), collapses to 1.27x on Shape B |
+| **Fixed-schedule zstd+dict** | 87,705 B | **3.61x** | 4 | 1.27x | Retrained every 200 payloads on last 200 without drift detection |
+| **Adaptive zdict** | **88,888 B** | **3.56x** | **1** | **1.30x** | Detects drift at #608, resets buffer, retrains on 200 post-drift payloads at #808 |
+
+> **Adaptive Efficiency**: Adaptive zdict achieved compression comparable to fixed-schedule retraining (3.56x vs 3.61x, saving 46,120 bytes vs static) while requiring **75% fewer retraining operations** (1 drift-triggered retrain vs 4 blind scheduled retrains).
 
 ---
 
