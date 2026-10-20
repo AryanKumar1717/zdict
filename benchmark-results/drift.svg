@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="460" viewBox="0 0 860 460">
+  <rect width="100%" height="100%" fill="#ffffff" rx="8"/>
+  <rect width="100%" height="100%" fill="none" stroke="#e2e8f0" stroke-width="1" rx="8"/>
+  <text x="30" y="35" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="bold" fill="#1a202c">API Schema Drift: Static vs Adaptive zdict</text>
+  <text x="30" y="55" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#718096">Traffic: 60% Shape A → 40% Shape B | Rolling 100-payload evaluation window</text>
+  <line x1="450" y1="36" x2="466" y2="36" stroke="#718096" stroke-width="2.5"/>
+  <circle cx="458" cy="36" r="3.5" fill="#718096"/>
+  <text x="472" y="40" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">gzip (lvl 6)</text>
+  <line x1="555" y1="36" x2="571" y2="36" stroke="#e53e3e" stroke-width="2.5"/>
+  <circle cx="563" cy="36" r="3.5" fill="#e53e3e"/>
+  <text x="577" y="40" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">static zstd+dict</text>
+  <line x1="680" y1="36" x2="696" y2="36" stroke="#38a169" stroke-width="2.5"/>
+  <circle cx="688" cy="36" r="3.5" fill="#38a169"/>
+  <text x="702" y="40" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">adaptive zdict</text>
+  <line x1="70" y1="380" x2="820" y2="380" stroke="#edf2f7" stroke-width="1"/>
+  <text x="60" y="384" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">0.0x</text>
+  <line x1="70" y1="320" x2="820" y2="320" stroke="#edf2f7" stroke-width="1"/>
+  <text x="60" y="324" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">2.2x</text>
+  <line x1="70" y1="260" x2="820" y2="260" stroke="#edf2f7" stroke-width="1"/>
+  <text x="60" y="264" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">4.4x</text>
+  <line x1="70" y1="200" x2="820" y2="200" stroke="#edf2f7" stroke-width="1"/>
+  <text x="60" y="204" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">6.6x</text>
+  <line x1="70" y1="140" x2="820" y2="140" stroke="#edf2f7" stroke-width="1"/>
+  <text x="60" y="144" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">8.8x</text>
+  <line x1="70" y1="80" x2="820" y2="80" stroke="#edf2f7" stroke-width="1"/>
+  <text x="60" y="84" font-family="system-ui, sans-serif" font-size="11" fill="#a0aec0" text-anchor="end">11.0x</text>
+  <line x1="520" y1="70" x2="520" y2="380" stroke="#cbd5e0" stroke-width="2" stroke-dasharray="4,4"/>
+  <text x="520" y="65" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#e53e3e" text-anchor="middle">Schema Drift (A → B)</text>
+  <line x1="70" y1="380" x2="70" y2="385" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="70" y="400" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">100</text>
+  <line x1="153" y1="380" x2="153" y2="385" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="153" y="400" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">200</text>
+  <line x1="236" y1="380" x2="236" y2="385" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="236" y="400" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">300</text>
+  <line x1="320" y1="380" x2="320" y2="385" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="320" y="400" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">400</text>
+  <line x1="403" y1="380" x2="403" y2="385" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="403" y="400" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">500</text>
+  <line x1="486" y1="380" x2="486" y2="385" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="486" y="400" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">600</text>
+  <line x1="570" y1="380" x2="570" y2="385" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="570" y="400" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">700</text>
+  <line x1="653" y1="380" x2="653" y2="385" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="653" y="400" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">800</text>
+  <line x1="736" y1="380" x2="736" y2="385" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="736" y="400" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">900</text>
+  <line x1="820" y1="380" x2="820" y2="385" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="820" y="400" font-family="system-ui, sans-serif" font-size="11" fill="#718096" text-anchor="middle">1000</text>
+  <polyline fill="none" stroke="#718096" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" points="70,348 153,347 236,347 320,347 403,347 486,347 570,346 653,346 736,346 820,346"/>
+  <polyline fill="none" stroke="#e53e3e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" points="70,133 153,179 236,187 320,177 403,187 486,187 570,345 653,346 736,346 820,346"/>
+  <polyline fill="none" stroke="#38a169" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" points="70,133 153,179 236,187 320,177 403,187 486,187 570,346 653,346 736,222 820,143"/>
+  <circle cx="70" cy="348" r="3.5" fill="#718096"/>
+  <circle cx="153" cy="347" r="3.5" fill="#718096"/>
+  <circle cx="236" cy="347" r="3.5" fill="#718096"/>
+  <circle cx="320" cy="347" r="3.5" fill="#718096"/>
+  <circle cx="403" cy="347" r="3.5" fill="#718096"/>
+  <circle cx="486" cy="347" r="3.5" fill="#718096"/>
+  <circle cx="570" cy="346" r="3.5" fill="#718096"/>
+  <circle cx="653" cy="346" r="3.5" fill="#718096"/>
+  <circle cx="736" cy="346" r="3.5" fill="#718096"/>
+  <circle cx="820" cy="346" r="3.5" fill="#718096"/>
+  <rect x="67" y="130" width="6" height="6" fill="#e53e3e"/>
+  <rect x="150" y="176" width="6" height="6" fill="#e53e3e"/>
+  <rect x="233" y="184" width="6" height="6" fill="#e53e3e"/>
+  <rect x="317" y="174" width="6" height="6" fill="#e53e3e"/>
+  <rect x="400" y="184" width="6" height="6" fill="#e53e3e"/>
+  <rect x="483" y="184" width="6" height="6" fill="#e53e3e"/>
+  <rect x="567" y="342" width="6" height="6" fill="#e53e3e"/>
+  <rect x="650" y="343" width="6" height="6" fill="#e53e3e"/>
+  <rect x="733" y="343" width="6" height="6" fill="#e53e3e"/>
+  <rect x="817" y="343" width="6" height="6" fill="#e53e3e"/>
+  <circle cx="70" cy="133" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="153" cy="179" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="236" cy="187" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="320" cy="177" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="403" cy="187" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="486" cy="187" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="570" cy="346" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="653" cy="346" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="736" cy="222" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="820" cy="143" r="4" fill="#38a169" stroke="#ffffff" stroke-width="1.5"/>
+  <text x="445" y="420" font-family="system-ui, sans-serif" font-size="12" fill="#718096" text-anchor="middle">Payload Sequence (100 per window)</text>
+</svg>

@@ -1,0 +1,152 @@
+{
+  "date" : "2026-10-20T06:22:02.0933411Z",
+  "javaVersion" : "21.0.10",
+  "os" : "Windows 11 amd64",
+  "timingNotice" : "Timing is a simple loop after JVM warmup, not JMH.",
+  "groups" : [ {
+    "group" : "products_v1",
+    "totalPayloads" : 600,
+    "trainPayloads" : 400,
+    "testPayloads" : 200,
+    "originalBytes" : 57935,
+    "dictionarySizeBytes" : 16384,
+    "gzip" : {
+      "name" : "gzip (level 6)",
+      "compressedBytes" : 47745,
+      "ratio" : 1.2134254895800607,
+      "savingsPercent" : 17.588676965564854,
+      "p50Micros" : 15.4,
+      "p99Micros" : 47.7
+    },
+    "zstd" : {
+      "name" : "zstd (level 3)",
+      "compressedBytes" : 47573,
+      "ratio" : 1.2178126248081895,
+      "savingsPercent" : 17.885561405022866,
+      "p50Micros" : 6.9,
+      "p99Micros" : 11.4
+    },
+    "zstdDict" : {
+      "name" : "zstd+dict (level 3)",
+      "compressedBytes" : 7762,
+      "ratio" : 7.463926822983767,
+      "savingsPercent" : 86.60222663329593,
+      "p50Micros" : 3.2,
+      "p99Micros" : 6.3
+    },
+    "buckets" : [ {
+      "bucketName" : "<1KB",
+      "count" : 200,
+      "originalBytes" : 57935,
+      "gzipRatio" : 1.2134254895800607,
+      "zstdRatio" : 1.2178126248081895,
+      "zstdDictRatio" : 7.463926822983767
+    }, {
+      "bucketName" : "1-4KB",
+      "count" : 0,
+      "originalBytes" : 0,
+      "gzipRatio" : 0.0,
+      "zstdRatio" : 0.0,
+      "zstdDictRatio" : 0.0
+    }, {
+      "bucketName" : ">4KB",
+      "count" : 0,
+      "originalBytes" : 0,
+      "gzipRatio" : 0.0,
+      "zstdRatio" : 0.0,
+      "zstdDictRatio" : 0.0
+    } ],
+    "avgBytesSavedVsGzip" : 199.915,
+    "breakEvenPayloads" : 82
+  }, {
+    "group" : "products_v2",
+    "totalPayloads" : 400,
+    "trainPayloads" : 266,
+    "testPayloads" : 134,
+    "originalBytes" : 47896,
+    "dictionarySizeBytes" : 16384,
+    "gzip" : {
+      "name" : "gzip (level 6)",
+      "compressedBytes" : 37433,
+      "ratio" : 1.279512729409879,
+      "savingsPercent" : 21.8452480374144,
+      "p50Micros" : 17.5,
+      "p99Micros" : 27.2
+    },
+    "zstd" : {
+      "name" : "zstd (level 3)",
+      "compressedBytes" : 38532,
+      "ratio" : 1.243018789577494,
+      "savingsPercent" : 19.55069316853182,
+      "p50Micros" : 7.6,
+      "p99Micros" : 12.2
+    },
+    "zstdDict" : {
+      "name" : "zstd+dict (level 3)",
+      "compressedBytes" : 5549,
+      "ratio" : 8.631465128852046,
+      "savingsPercent" : 88.41448137631535,
+      "p50Micros" : 3.2,
+      "p99Micros" : 8.4
+    },
+    "buckets" : [ {
+      "bucketName" : "<1KB",
+      "count" : 134,
+      "originalBytes" : 47896,
+      "gzipRatio" : 1.279512729409879,
+      "zstdRatio" : 1.243018789577494,
+      "zstdDictRatio" : 8.631465128852046
+    }, {
+      "bucketName" : "1-4KB",
+      "count" : 0,
+      "originalBytes" : 0,
+      "gzipRatio" : 0.0,
+      "zstdRatio" : 0.0,
+      "zstdDictRatio" : 0.0
+    }, {
+      "bucketName" : ">4KB",
+      "count" : 0,
+      "originalBytes" : 0,
+      "gzipRatio" : 0.0,
+      "zstdRatio" : 0.0,
+      "zstdDictRatio" : 0.0
+    } ],
+    "avgBytesSavedVsGzip" : 237.9402985074627,
+    "breakEvenPayloads" : 69
+  } ],
+  "overall" : {
+    "group" : "ALL_GROUPS_TOTAL",
+    "totalPayloads" : 1000,
+    "trainPayloads" : 666,
+    "testPayloads" : 334,
+    "originalBytes" : 105831,
+    "dictionarySizeBytes" : 32768,
+    "gzip" : {
+      "name" : "gzip (level 6)",
+      "compressedBytes" : 85178,
+      "ratio" : 1.2424687125783653,
+      "savingsPercent" : 19.515075922933732,
+      "p50Micros" : 16.45,
+      "p99Micros" : 37.45
+    },
+    "zstd" : {
+      "name" : "zstd (level 3)",
+      "compressedBytes" : 86105,
+      "ratio" : 1.2290923872016724,
+      "savingsPercent" : 18.63915109939431,
+      "p50Micros" : 7.25,
+      "p99Micros" : 11.8
+    },
+    "zstdDict" : {
+      "name" : "zstd+dict (level 3)",
+      "compressedBytes" : 13311,
+      "ratio" : 7.950642325895876,
+      "savingsPercent" : 87.422399863934,
+      "p50Micros" : 3.2,
+      "p99Micros" : 7.3500000000000005
+    },
+    "buckets" : [ ],
+    "avgBytesSavedVsGzip" : 215.17065868263472,
+    "breakEvenPayloads" : 153
+  }
+}
