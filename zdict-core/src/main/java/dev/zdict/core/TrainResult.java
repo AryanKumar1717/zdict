@@ -22,6 +22,7 @@ public class TrainResult {
     private Double gainVsZstd;
     private Double gainVsGzip;
     private Double minGain;
+    private int dictSize;
     private String reason;
 
     public TrainResult() {
@@ -147,6 +148,14 @@ public class TrainResult {
 
     public void setMinGain(Double minGain) {
         this.minGain = minGain;
+    }
+
+    public int getDictSize() {
+        return dictSize;
+    }
+
+    public void setDictSize(int dictSize) {
+        this.dictSize = dictSize;
     }
 
     public String getReason() {

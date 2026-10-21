@@ -166,6 +166,7 @@ public class DictionaryTrainerService {
         TrainResult result = new TrainResult();
         result.setGroup(group);
         result.setDictionaryId(candidateId);
+        result.setDictSize(candidateBytes.length);
         result.setSampleCount(sampleCount);
         result.setTrainCount(trainCount);
         result.setHoldoutCount(holdoutCount);
