@@ -4,33 +4,37 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>dev.zdict</groupId>
+  <parent>
+    <groupId>dev.zdict</groupId>
+    <artifactId>zdict-parent</artifactId>
+    <version>0.1.0</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
   <artifactId>zdict-bench</artifactId>
-  <version>0.0.1</version>
+  <name>zdict-bench</name>
+  <description>Benchmarking harness, drift benchmark, and replay harness for zdict</description>
 
   <properties>
-    <maven.compiler.source>17</maven.compiler.source>
-    <maven.compiler.target>17</maven.compiler.target>
-    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <exec.mainClass>dev.zdict.Bench</exec.mainClass>
   </properties>
 
   <dependencies>
-    <!-- If this version isn't found, use the latest from Maven Central -->
+    <dependency>
+      <groupId>dev.zdict</groupId>
+      <artifactId>zdict-core</artifactId>
+    </dependency>
     <dependency>
       <groupId>com.github.luben</groupId>
       <artifactId>zstd-jni</artifactId>
-      <version>1.5.6-3</version>
     </dependency>
     <dependency>
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
-      <version>2.17.2</version>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
-      <version>5.10.3</version>
       <scope>test</scope>
     </dependency>
   </dependencies>

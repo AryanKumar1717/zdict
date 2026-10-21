@@ -1,5 +1,7 @@
 package dev.zdict.demo;
 
+import dev.zdict.core.PayloadScrubber;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

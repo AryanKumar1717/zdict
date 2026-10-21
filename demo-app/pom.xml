@@ -5,23 +5,26 @@
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-parent</artifactId>
-    <version>3.3.4</version>
-    <relativePath/>
+    <groupId>dev.zdict</groupId>
+    <artifactId>zdict-parent</artifactId>
+    <version>0.1.0</version>
+    <relativePath>../pom.xml</relativePath>
   </parent>
 
-  <groupId>dev.zdict</groupId>
   <artifactId>demo-app</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
   <name>demo-app</name>
   <description>Demo Spring Boot app for zdict</description>
 
-  <properties>
-    <java.version>17</java.version>
-  </properties>
-
   <dependencies>
+    <dependency>
+      <groupId>dev.zdict</groupId>
+      <artifactId>zdict-spring-boot-starter</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>dev.zdict</groupId>
+      <artifactId>zdict-client</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>
@@ -29,11 +32,6 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>com.github.luben</groupId>
-      <artifactId>zstd-jni</artifactId>
-      <version>1.5.6-3</version>
     </dependency>
 
     <dependency>

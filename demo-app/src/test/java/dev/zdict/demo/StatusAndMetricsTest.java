@@ -1,5 +1,8 @@
 package dev.zdict.demo;
 
+import dev.zdict.core.*;
+import dev.zdict.spring.*;
+
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;

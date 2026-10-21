@@ -19,7 +19,7 @@ public class ProductController {
     private final ProductGenerator generator = new ProductGenerator(42);
 
     @GetMapping
-    public Map<String, Object> list(@RequestParam(defaultValue = "1") int page) {
+    public Map<String, Object> list(@RequestParam(name = "page", defaultValue = "1") int page) {
         List<Product> items = generator.generatePage(page);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("items", items);
@@ -29,7 +29,7 @@ public class ProductController {
     }
 
     @GetMapping("/{id}")
-    public Map<String, Object> single(@PathVariable int id) {
+    public Map<String, Object> single(@PathVariable("id") int id) {
         Product product = generator.generate(id);
         return wrap(product, "product=" + id);
     }

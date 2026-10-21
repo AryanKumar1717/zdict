@@ -1,5 +1,8 @@
 package dev.zdict.demo;
 
+import dev.zdict.core.*;
+import dev.zdict.spring.ZdictProperties;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

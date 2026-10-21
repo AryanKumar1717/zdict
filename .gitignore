@@ -6,3 +6,4 @@ samples/
 zdict-data/
 benchmark-data/
 benchmark-data/real/
+.vscode/

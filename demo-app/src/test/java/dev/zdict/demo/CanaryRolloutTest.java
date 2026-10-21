@@ -1,5 +1,9 @@
 package dev.zdict.demo;
 
+import dev.zdict.core.*;
+import dev.zdict.spring.ZdictProperties;
+import dev.zdict.spring.ZstdDictFilter;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

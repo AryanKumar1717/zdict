@@ -2,6 +2,9 @@ package dev.zdict.demo;
 
 import dev.zdict.client.ZdictClient;
 import dev.zdict.client.ZdictResponse;
+import dev.zdict.core.*;
+import dev.zdict.spring.ZdictProperties;
+import dev.zdict.spring.ZstdDictFilter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

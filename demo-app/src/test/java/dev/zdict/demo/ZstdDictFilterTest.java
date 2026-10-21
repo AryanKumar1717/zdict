@@ -1,5 +1,8 @@
 package dev.zdict.demo;
 
+import dev.zdict.core.*;
+import dev.zdict.spring.*;
+
 import com.github.luben.zstd.Zstd;
 import com.github.luben.zstd.ZstdDictCompress;
 import com.github.luben.zstd.ZstdDictDecompress;
