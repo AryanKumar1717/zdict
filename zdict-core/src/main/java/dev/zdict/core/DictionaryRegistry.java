@@ -343,6 +343,10 @@ public class DictionaryRegistry implements Closeable {
     }
 
     public synchronized boolean promoteCanary(String group) {
+        return promoteCanary(group, null);
+    }
+
+    public synchronized boolean promoteCanary(String group, Double liveBaseline) {
         String slug = ZdictConstants.toGroupSlug(group);
         List<DictionaryVersion> currentList = groupVersions.get(slug);
         if (currentList == null) return false;
@@ -364,6 +368,9 @@ public class DictionaryRegistry implements Closeable {
             saveMetadata(slug, active.getMetadata());
         }
 
+        if (liveBaseline != null && liveBaseline > 0.0) {
+            canary.getMetadata().setBaseline(liveBaseline);
+        }
         canary.promoteToActive();
         saveMetadata(slug, canary.getMetadata());
         return true;

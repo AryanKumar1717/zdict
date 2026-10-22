@@ -180,14 +180,15 @@ public class AutoTrainerService {
             double activeFailRate = (active != null && ratioTracker != null) ? ratioTracker.getFailureRate(group, active.getId()) : 0.0;
 
             if (canaryMean >= activeMean * 1.03 && canaryFailRate <= activeFailRate) {
-                registry.promoteCanary(group);
-                String reason = String.format("Canary mean (%.4f) >= active (%.4f) * 1.03 and failure rate (%.4f) <= active (%.4f)",
-                        canaryMean, activeMean, canaryFailRate, activeFailRate);
+                double holdoutRatio = canary.getMetadata().getBaseline();
+                registry.promoteCanary(group, canaryMean);
+                String reason = String.format("Canary mean (%.4f) >= active (%.4f) * 1.03 and failure rate (%.4f) <= active (%.4f) [liveMean=%.4f, holdoutRatio=%.4f]",
+                        canaryMean, activeMean, canaryFailRate, activeFailRate, canaryMean, holdoutRatio);
                 if (eventLog != null) {
                     eventLog.record("PROMOTED", group, canary.getId(), reason);
                 }
-                log.info("Canary {} PROMOTED to ACTIVE for group '{}': canaryMean={:.4f}, activeMean={:.4f}, canaryFailRate={:.4f}, activeFailRate={:.4f}",
-                        canary.getId(), group, canaryMean, activeMean, canaryFailRate, activeFailRate);
+                log.info("Canary {} PROMOTED to ACTIVE for group '{}': canaryMean={:.4f}, activeMean={:.4f}, canaryFailRate={:.4f}, activeFailRate={:.4f}, liveBaseline={:.4f}, holdoutRatio={:.4f}",
+                        canary.getId(), group, canaryMean, activeMean, canaryFailRate, activeFailRate, canaryMean, holdoutRatio);
             } else {
                 String reason;
                 if (canaryMean < activeMean * 1.03) {

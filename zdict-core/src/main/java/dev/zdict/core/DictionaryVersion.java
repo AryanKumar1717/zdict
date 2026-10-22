@@ -83,6 +83,13 @@ public class DictionaryVersion implements Closeable {
         metadata.setState("ACTIVE");
     }
 
+    public synchronized void promoteToActive(double liveBaseline) {
+        metadata.setState("ACTIVE");
+        if (liveBaseline > 0.0) {
+            metadata.setBaseline(liveBaseline);
+        }
+    }
+
     public synchronized void retire() {
         retire(null);
     }
