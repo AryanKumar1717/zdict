@@ -52,31 +52,24 @@ public class RatioTracker {
         if (group == null || dictId == null || compBytes <= 0) {
             return;
         }
-        double ratio = (double) origBytes / compBytes;
         GroupRatioStats gs = getGroupStats(group);
-        double mean;
+        double ratio;
         synchronized (gs) {
-            gs.recordSuccess(dictId, ratio, origBytes, compBytes);
-            mean = gs.getRollingMean(dictId);
+            gs.recordSuccess(dictId, origBytes, compBytes);
+            ratio = gs.getRollingRatio(dictId);
         }
         if (metrics != null) {
-            metrics.updateRollingRatio(group, mean);
+            metrics.updateRollingRatio(group, ratio);
         }
     }
 
     public void recordSuccess(String group, String dictId, double ratio) {
-        if (group == null || dictId == null) {
+        if (group == null || dictId == null || ratio <= 0.0) {
             return;
         }
-        GroupRatioStats gs = getGroupStats(group);
-        double mean;
-        synchronized (gs) {
-            gs.recordSuccess(dictId, ratio);
-            mean = gs.getRollingMean(dictId);
-        }
-        if (metrics != null) {
-            metrics.updateRollingRatio(group, mean);
-        }
+        long comp = 1000L;
+        long orig = Math.round(ratio * 1000.0);
+        recordSuccess(group, dictId, orig, comp);
     }
 
     public void recordFailure(String group, String dictId) {
@@ -90,12 +83,16 @@ public class RatioTracker {
     }
 
     public double getRollingMean(String group, String dictId) {
+        return getRollingRatio(group, dictId);
+    }
+
+    public double getRollingRatio(String group, String dictId) {
         if (group == null || dictId == null) {
             return 0.0;
         }
         GroupRatioStats gs = getGroupStats(group);
         synchronized (gs) {
-            return gs.getRollingMean(dictId);
+            return gs.getRollingRatio(dictId);
         }
     }
 
@@ -219,8 +216,8 @@ public class RatioTracker {
             return windows.computeIfAbsent(dictId, k -> new DictWindow(windowCapacity));
         }
 
-        void recordSuccess(String dictId, double ratio, long origBytes, long compBytes) {
-            getOrCreate(dictId).recordSuccess(ratio);
+        void recordSuccess(String dictId, long origBytes, long compBytes) {
+            getOrCreate(dictId).recordSuccess(origBytes, compBytes);
             if (origBytes > 0 && compBytes > 0) {
                 totalBytesOriginal += origBytes;
                 totalBytesCompressed += compBytes;
@@ -229,7 +226,9 @@ public class RatioTracker {
         }
 
         void recordSuccess(String dictId, double ratio) {
-            recordSuccess(dictId, ratio, 0, 0);
+            long comp = 1000L;
+            long orig = Math.round(ratio * 1000.0);
+            recordSuccess(dictId, orig, comp);
         }
 
         long getTotalBytesOriginal() {
@@ -253,8 +252,12 @@ public class RatioTracker {
         }
 
         double getRollingMean(String dictId) {
+            return getRollingRatio(dictId);
+        }
+
+        double getRollingRatio(String dictId) {
             DictWindow w = windows.get(dictId);
-            return w != null ? w.getRollingMean() : 0.0;
+            return w != null ? w.getRollingRatio() : 0.0;
         }
 
         int getResponseCount(String dictId) {
@@ -278,32 +281,41 @@ public class RatioTracker {
     }
 
     static class DictWindow {
-        private final double[] values;
+        private final long[] origWindow;
+        private final long[] compWindow;
         private int head = 0;
         private int count = 0;
-        private double sum = 0.0;
+        private long sumOrig = 0;
+        private long sumComp = 0;
         private long failures = 0;
         private long totalResponses = 0;
 
         DictWindow(int capacity) {
-            this.values = new double[capacity];
+            this.origWindow = new long[capacity];
+            this.compWindow = new long[capacity];
         }
 
-        void recordSuccess(double ratio) {
-            if (count == values.length) {
-                sum -= values[head];
+        void recordSuccess(long origBytes, long compBytes) {
+            if (count == origWindow.length) {
+                sumOrig -= origWindow[head];
+                sumComp -= compWindow[head];
             } else {
                 count++;
             }
-            values[head] = ratio;
-            sum += ratio;
-            head = (head + 1) % values.length;
+            origWindow[head] = origBytes;
+            compWindow[head] = compBytes;
+            sumOrig += origBytes;
+            sumComp += compBytes;
+            head = (head + 1) % origWindow.length;
             if (head == 0) {
-                double recomputed = 0.0;
+                long recomputedOrig = 0;
+                long recomputedComp = 0;
                 for (int i = 0; i < count; i++) {
-                    recomputed += values[i];
+                    recomputedOrig += origWindow[i];
+                    recomputedComp += compWindow[i];
                 }
-                sum = recomputed;
+                sumOrig = recomputedOrig;
+                sumComp = recomputedComp;
             }
             totalResponses++;
         }
@@ -312,9 +324,21 @@ public class RatioTracker {
             failures++;
         }
 
+        double getRollingRatio() {
+            if (count == 0 || sumComp <= 0) return 0.0;
+            return (double) sumOrig / sumComp;
+        }
+
         double getRollingMean() {
-            if (count == 0) return 0.0;
-            return sum / count;
+            return getRollingRatio();
+        }
+
+        long getWindowOriginalBytes() {
+            return sumOrig;
+        }
+
+        long getWindowCompressedBytes() {
+            return sumComp;
         }
 
         int getCount() {

@@ -195,7 +195,7 @@ public class RealDataDriftCanaryIntegrationTest {
         propRegistry.add("zdict.dictionary-path", () -> "");
         propRegistry.add("zdict.paths", () -> "/api/real-replay");
         propRegistry.add("zdict.sample.rate", () -> "1.0");
-        propRegistry.add("zdict.train.min-samples", () -> "40");
+        propRegistry.add("zdict.train.min-samples", () -> "200");
         propRegistry.add("zdict.train.dict-size", () -> "16384");
         propRegistry.add("zdict.train.cooldown", () -> "1m");
         propRegistry.add("zdict.drift.min-responses", () -> "20");
@@ -249,8 +249,8 @@ public class RealDataDriftCanaryIntegrationTest {
         // Step 1: Sampling starts with forecast payloads (uncompressed)
         // -------------------------------------------------------------
         controller.setGroup("forecast");
-        System.out.println("\n[Phase 1] Sending initial traffic for 'forecast' payloads...");
-        for (int i = 0; i < 50; i++) {
+        System.out.println("\n[Phase 1] Sending initial traffic (300 warmup requests) for 'forecast' payloads...");
+        for (int i = 0; i < 300; i++) {
             ZdictResponse resp = client.get(url);
             assertThat(resp.statusCode()).isEqualTo(200);
             assertThat(resp.compressed()).isFalse();
@@ -259,7 +259,7 @@ public class RealDataDriftCanaryIntegrationTest {
 
         int initialSamples = sampleStore.getSampleCount(group);
         System.out.printf("  -> Collected %,d samples in SampleStore for '%s'%n", initialSamples, group);
-        assertThat(initialSamples).isGreaterThanOrEqualTo(40);
+        assertThat(initialSamples).isGreaterThanOrEqualTo(200);
 
         // -------------------------------------------------------------
         // Step 2: First dictionary trained and promoted to ACTIVE
@@ -330,12 +330,12 @@ public class RealDataDriftCanaryIntegrationTest {
 
         // Send fresh geocoding requests to populate clean post-drift reservoir
         System.out.println("  -> Collecting fresh 'geocoding' samples...");
-        for (int i = 0; i < 50; i++) {
+        for (int i = 0; i < 210; i++) {
             ZdictResponse resp = client.get(url);
             assertThat(resp.statusCode()).isEqualTo(200);
             assertThat(resp.body()).contains("results");
         }
-        assertThat(sampleStore.getSampleCount(group)).isGreaterThanOrEqualTo(40);
+        assertThat(sampleStore.getSampleCount(group)).isGreaterThanOrEqualTo(200);
         System.out.printf("  -> Collected %,d fresh geocoding samples.%n", sampleStore.getSampleCount(group));
 
         // -------------------------------------------------------------

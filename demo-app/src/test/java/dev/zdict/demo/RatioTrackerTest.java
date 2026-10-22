@@ -186,4 +186,46 @@ class RatioTrackerTest {
         assertEquals(3.0, tracker.getRollingMean(group, dictId), 0.001);
         assertEquals(threads * (operationsPerThread / 20), tracker.getFailureCount(group, dictId));
     }
+
+    @Test
+    void testMixedPayloadSizesUsesTotalBytesNotMeanOfRatios() {
+        String group = "/api/mixed";
+        String dictId = "mixed_dict";
+
+        // Scenario:
+        // 10 small payloads: 300 B original, 30 B compressed -> individual ratio 10.0x
+        // 2 large payloads: 20,000 B original, 10,000 B compressed -> individual ratio 2.0x
+        // Total original = 10 * 300 + 2 * 20,000 = 3,000 + 40,000 = 43,000 B
+        // Total compressed = 10 * 30 + 2 * 10,000 = 300 + 20,000 = 20,300 B
+        // Total-bytes ratio = 43,000 / 20,300 = 2.1182x (~2.12x)
+        // Mean of ratios = (10 * 10.0 + 2 * 2.0) / 12 = 104.0 / 12 = 8.667x
+        for (int i = 0; i < 10; i++) {
+            tracker.recordSuccess(group, dictId, 300, 30);
+        }
+        for (int i = 0; i < 2; i++) {
+            tracker.recordSuccess(group, dictId, 20_000, 10_000);
+        }
+
+        assertEquals(12, tracker.getResponseCount(group, dictId));
+
+        double rollingRatio = tracker.getRollingRatio(group, dictId);
+        double rollingMean = tracker.getRollingMean(group, dictId);
+        assertEquals(rollingRatio, rollingMean, 0.0001);
+
+        double expectedTotalBytesRatio = 43_000.0 / 20_300.0; // ~2.1182
+        double meanOfRatios = 104.0 / 12.0;                  // ~8.6667
+
+        assertEquals(expectedTotalBytesRatio, rollingRatio, 0.001);
+        assertNotEquals(meanOfRatios, rollingRatio, 1.0);
+        assertTrue(rollingRatio < 2.5,
+                "Rolling ratio should reflect total bytes (~2.12x), not mean of ratios (~8.67x)");
+
+        // Also verify drift detection behavior with baseline 2.5x and threshold 0.15 (cutoff = 2.125x)
+        // With total-bytes ratio 2.1182x < 2.125x, drift is detected!
+        // (If mean-of-ratios 8.67x were used, drift would not have been detected).
+        props.getDrift().setMinResponses(12);
+        assertTrue(tracker.isDrifting(group, dictId, 2.5),
+                "Should detect drift because true bandwidth efficiency (2.12x) dropped below 2.5 * 0.85 (2.125x)");
+    }
 }
+
